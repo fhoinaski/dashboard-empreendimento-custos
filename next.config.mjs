@@ -19,7 +19,8 @@ const nextConfig = {
     webpackBuildWorker: false, // Desative se estiver causando problemas
     parallelServerBuildTraces: false,
     parallelServerCompiles: false,
-    serverComponentsExternalPackages: ['mongoose'], // Adicione se usar mongoose
+    serverComponentsExternalPackages: ['mongoose'], 
+    serverExternalPackages: ['bcrypt'],
   },
   // Adicione configurações de logging para depuração
   logging: {

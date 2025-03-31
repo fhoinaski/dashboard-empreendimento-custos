@@ -1,0 +1,12 @@
+{
+    "builds": [
+      {
+        "src": "package.json",
+        "use": "@vercel/node",
+        "config": {
+          "includeFiles": ["node_modules/.pnpm/bcrypt@5.1.1/**/*"]
+        }
+      }
+    ],
+    "installCommand": "pnpm install --ignore-scripts=false"
+  }

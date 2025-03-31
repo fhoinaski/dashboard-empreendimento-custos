@@ -1,6 +1,6 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { compare } from "bcrypt"; // Você já está usando bcrypt neste projeto, não bcryptjs
+import { compare } from "bcryptjs"; 
 import connectToDatabase from '../db/mongodb'; // Seu arquivo mongoose atual
 import { User } from '../db/models';
 import { Model } from "mongoose";
