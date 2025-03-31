@@ -1,8 +1,8 @@
 import type { NextAuthOptions, DefaultSession } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import { MongoDBAdapter } from '@next-auth/mongodb-adapter';
-import { MongoClient } from 'mongodb'; // Adicione esta importação
 import { compare } from 'bcrypt';
+import connectToDatabase from '../db/mongodb'; // Seu arquivo Mongoose atual
+import { User } from '../db/models';
 
 declare module "next-auth" {
   interface User {
@@ -17,14 +17,9 @@ declare module "next-auth" {
   }
 }
 
-import connectToDatabase from '../db/mongodb'; // Mantenha para o Mongoose
-import { User } from '../db/models';
-
-const mongoClient = new MongoClient(process.env.MONGODB_URI || 'mongodb://localhost:27017/real-estate-dashboard');
-
 export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
-  adapter: MongoDBAdapter(mongoClient.connect()), // Use o cliente nativo
+  // Remova a linha do adapter - não precisamos dele com CredentialsProvider
   session: {
     strategy: 'jwt',
     maxAge: 24 * 60 * 60, // 24 horas
@@ -45,20 +40,26 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        await connectToDatabase(); // Use o Mongoose para verificar credenciais
-        
-        const user = await User.findOne({ email: credentials.email });
-        if (!user) return null;
-        
-        const isPasswordValid = await compare(credentials.password, user.password);
-        if (!isPasswordValid) return null;
-        
-        return {
-          id: user._id.toString(),
-          name: user.name,
-          email: user.email,
-          role: user.role,
-        };
+        try {
+          // Conecte ao banco de dados usando sua função existente
+          await connectToDatabase();
+          
+          const user = await User.findOne({ email: credentials.email });
+          if (!user) return null;
+          
+          const isPasswordValid = await compare(credentials.password, user.password);
+          if (!isPasswordValid) return null;
+          
+          return {
+            id: user._id.toString(),
+            name: user.name,
+            email: user.email,
+            role: user.role,
+          };
+        } catch (error) {
+          console.error("Erro na autenticação:", error);
+          return null;
+        }
       }
     })
   ],
