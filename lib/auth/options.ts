@@ -45,7 +45,7 @@ const generateSessionId = () => {
 
 // Verifica se está em produção
 const isProduction = process.env.NODE_ENV === 'production';
-const cookieDomain = isProduction ? '.seusite.com' : 'localhost';
+const cookieDomain = isProduction ? 'https://dashboard-custos.vercel.app/' : 'localhost';
 
 export const authOptions: NextAuthOptions = {
   providers: [
