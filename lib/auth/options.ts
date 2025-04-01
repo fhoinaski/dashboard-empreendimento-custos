@@ -6,6 +6,7 @@ import { User } from '../db/models';
 import { Model } from "mongoose";
 import { DefaultUser, RequestInternal } from "next-auth";
 
+// Extendendo tipos do NextAuth
 declare module "next-auth" {
   interface User extends DefaultUser {
     role?: string;
@@ -41,6 +42,10 @@ type UserModel = Model<IUser>;
 const generateSessionId = () => {
   return Math.random().toString(36).substring(2) + Date.now().toString(36);
 };
+
+// Verifica se está em produção
+const isProduction = process.env.NODE_ENV === 'production';
+const cookieDomain = isProduction ? '.seusite.com' : 'localhost';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -93,7 +98,7 @@ export const authOptions: NextAuthOptions = {
   
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60,
+    maxAge: 24 * 60 * 60, // 24 horas
   },
   
   pages: {
@@ -103,39 +108,35 @@ export const authOptions: NextAuthOptions = {
   
   callbacks: {
     async jwt({ token, user }) {
-      console.log("[JWT Callback] Antes de atualizar token:", { token, user });
       if (user) {
         token.id = user.id;
         token.role = user.role;
         token.sessionId = user.sessionId;
       }
-      console.log("[JWT Callback] Após atualizar token:", { token });
       return token;
     },
     
     async session({ session, token }) {
-      console.log("[Session Callback] Antes de atualizar sessão:", { session, token });
       if (token && session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as string;
         session.user.sessionId = token.sessionId as string | undefined;
       }
-      console.log("[Session Callback] Após atualizar sessão:", { session });
       return session;
     },
   },
   
   secret: process.env.NEXTAUTH_SECRET,
-  debug: true, // Habilitar debug completo para mais logs
+  debug: !isProduction, // Desativa em produção
   cookies: {
     sessionToken: {
-      name: `next-auth.session-token`, // Simplificar o nome para evitar conflitos
+      name: `next-auth.session-token`,
       options: {
         httpOnly: true,
-        sameSite: "lax", // Usar "lax" para compatibilidade
+        sameSite: "lax",
         path: "/",
-        secure: false, // Forçar false em localhost
-        domain: "localhost", // Explicitamente localhost
+        secure: isProduction, // HTTPS obrigatório em produção
+        domain: cookieDomain, // Domínio dinâmico
       },
     },
   },
