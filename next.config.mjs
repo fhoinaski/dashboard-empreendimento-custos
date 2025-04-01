@@ -1,3 +1,13 @@
+import nextPWA from 'next-pwa';
+
+const isDev = process.env.NODE_ENV === 'development';
+const withPWA = nextPWA({
+  dest: 'public',
+  register: true,
+  skipWaiting: true,
+  disable: isDev,
+});
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
@@ -37,9 +47,8 @@ const nextConfig = {
   },
 };
 
-// Transformado para uma função assíncrona para lidar com await
-export default async function() {
-  // Verifique se há configurações de usuário
+// Async function to merge configs
+async function getConfig() {
   let userConfig = {};
   try {
     userConfig = (await import('./v0-user-next.config')).default || {};
@@ -47,7 +56,6 @@ export default async function() {
     console.log('Nenhuma configuração de usuário encontrada');
   }
 
-  // Função de merge melhorada
   function mergeConfigs(baseConfig, userConfig) {
     const merged = { ...baseConfig };
     
@@ -64,5 +72,8 @@ export default async function() {
     return merged;
   }
 
-  return mergeConfigs(nextConfig, userConfig);
+  const mergedConfig = mergeConfigs(nextConfig, userConfig);
+  return withPWA(mergedConfig);
 }
+
+export default getConfig();
