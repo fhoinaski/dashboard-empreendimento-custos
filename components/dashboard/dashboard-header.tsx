@@ -9,10 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { UserNav } from "@/components/dashboard/user-nav";
 import { NotificationsPopover } from "@/components/dashboard/notifications-popover";
-// Remover import de Loading se não for mais usado aqui
-// import { Loading } from "@/components/ui/loading";
-import { useNotifications } from "@/contexts/NotificationContext";
-import { cn } from "@/lib/utils";
+
 
 // Interface para as props
 interface DashboardHeaderProps {

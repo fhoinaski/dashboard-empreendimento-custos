@@ -45,13 +45,13 @@ function calculatePercentageChange(current: number, previous: number): number | 
 
 
 export async function GET(request: NextRequest) {
-    console.log("API GET /api/dashboard chamado");
+  
     try {
         // const session = await getServerSession(authOptions);
         // if (!session) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
         await connectToDatabase();
-        console.log("API GET /api/dashboard: Conectado DB.");
+        
 
         const { searchParams } = new URL(request.url);
         const toParam = searchParams.get("to");
@@ -61,9 +61,9 @@ export async function GET(request: NextRequest) {
         const endDate = toParam ? endOfDay(new Date(toParam)) : endOfDay(new Date());
         const startDate = fromParam ? startOfDay(new Date(fromParam)) : startOfDay(subDays(endDate, 29));
 
-        console.log(`API GET /api/dashboard: Período: ${startDate.toISOString()} a ${endDate.toISOString()}`);
+     
         if (empreendimentoIdParam && empreendimentoIdParam !== 'todos') {
-             console.log(`API GET /api/dashboard: Filtrando pelo Empreendimento ID: ${empreendimentoIdParam}`);
+             
         }
 
         // --- Construir Filtro Base ---
@@ -168,7 +168,7 @@ export async function GET(request: NextRequest) {
             comparison: comparisonData,
             upcomingExpenses: upcomingExpensesData,
         };
-        console.log("API GET /api/dashboard: Dados preparados (com filtro? ", !!baseMatchFilter.empreendimento, "):", data);
+       
         return NextResponse.json(data);
 
     } catch (error: unknown) {

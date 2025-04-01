@@ -1,28 +1,29 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { motion } from "framer-motion"
-import { useForm } from "react-hook-form"
-import { z } from "zod"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { Building2 } from "lucide-react"
-import { signIn } from "next-auth/react"
-import { Button } from "@/components/ui/button"
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
-import { Input } from "@/components/ui/input"
-import { useToast } from "@/components/ui/use-toast"
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Building2 } from "lucide-react";
+import { signIn, useSession } from "next-auth/react";
+import { Button } from "@/components/ui/button";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/use-toast";
 
 const formSchema = z.object({
   email: z.string().email({ message: "Email inválido" }),
   password: z.string().min(6, { message: "Senha deve ter pelo menos 6 caracteres" }),
-})
+});
 
 export default function LoginForm() {
-  const [isLoading, setIsLoading] = useState(false)
-  const [loginError, setLoginError] = useState(false)
-  const router = useRouter()
-  const { toast } = useToast()
+  const [isLoading, setIsLoading] = useState(false);
+  const [loginError, setLoginError] = useState(false);
+  const router = useRouter();
+  const { toast } = useToast();
+  const { data: session, status } = useSession();
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -30,45 +31,68 @@ export default function LoginForm() {
       email: "",
       password: "",
     },
-  })
+  });
+
+  useEffect(() => {
+  
+    if (status === "authenticated" && session?.user) {
+      
+      toast({
+        title: "Login bem-sucedido",
+        description: "Redirecionando para o dashboard...",
+      });
+      router.push("/dashboard");
+      router.refresh();
+      setIsLoading(false);
+    }
+  }, [status, session, router, toast]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    setIsLoading(true)
-    setLoginError(false)
+    setIsLoading(true);
+    setLoginError(false);
+
+    
 
     try {
       const result = await signIn("credentials", {
         redirect: false,
         email: values.email,
         password: values.password,
-      })
+        callbackUrl: "/dashboard",
+      });
 
-      if (!result?.ok) {
-        setLoginError(true)
+      
+
+      if (!result || result.error) {
+        console.error("[LoginForm] Erro na autenticação:", result?.error || "Resultado indefinido");
+        setLoginError(true);
         toast({
           variant: "destructive",
           title: "Erro de autenticação",
-          description: "Email ou senha incorretos",
-        })
-        return
+          description: result?.error || "Email ou senha incorretos",
+        });
+        setIsLoading(false);
+        return;
       }
+
       
       toast({
         title: "Login bem-sucedido",
         description: "Redirecionando para o dashboard...",
-      })
-      
-      // Redirecionamento após login bem-sucedido
-      router.push("/dashboard")
-      router.refresh() // Atualizar a sessão na interface
+      });
+
+      // Aguardar um pequeno delay para garantir que o cookie seja propagado
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      router.push("/dashboard");
+      router.refresh();
     } catch (error) {
+      console.error("[LoginForm] Erro inesperado:", error);
       toast({
         variant: "destructive",
         title: "Erro de conexão",
         description: "Não foi possível conectar ao servidor",
-      })
-    } finally {
-      setIsLoading(false)
+      });
+      setIsLoading(false);
     }
   }
 
@@ -146,5 +170,5 @@ export default function LoginForm() {
         <p>Use suas credenciais para fazer login no sistema</p>
       </div>
     </motion.div>
-  )
+  );
 }

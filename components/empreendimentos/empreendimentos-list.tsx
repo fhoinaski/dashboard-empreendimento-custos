@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react"; // Added useMemo
+import { useState, useEffect } from "react"; // Added useMemo
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation"; // Added useRouter, useSearchParams
 import { Building, Plus, Search, MoreHorizontal, MapPin, Calendar, ThumbsUp, AlertTriangle, Loader2, LayoutGrid, List } from "lucide-react";
@@ -16,13 +16,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton"; // Import Skeleton
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Import Tooltip
 import { useToast } from "@/components/ui/use-toast";
 import { motion } from "framer-motion";
 import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 
 // DEFINA ESTA INTERFACE EM UM ARQUIVO COMPARTILHADO (ex: types/index.ts) E IMPORTE AQUI

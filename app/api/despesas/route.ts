@@ -61,17 +61,17 @@ const ITEMS_PER_PAGE = 15;
 // --- API Route Handlers ---
 
 export async function GET(request: Request) {
-    console.log("[API GET /api/despesas] Recebida requisição.");
+    
     try {
         const session = await getServerSession(authOptions);
         if (!session?.user?.id) {
             console.warn("[API GET /api/despesas] Não autorizado.");
             return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
         }
-        console.log("[API GET /api/despesas] Sessão OK.");
+        
 
         await connectToDatabase();
-        console.log("[API GET /api/despesas] Conectado ao DB.");
+        
 
         const { searchParams } = new URL(request.url);
         const empreendimentoId = searchParams.get('empreendimento');
@@ -85,7 +85,7 @@ export async function GET(request: Request) {
         const page = pageParam ? parseInt(pageParam, 10) : 1;
         const skip = (page - 1) * limit;
 
-        console.log("[API GET /api/despesas] Params:", { empreendimentoId, statusParam, categoryParam, searchTerm, limit, page });
+      
 
         // --- Build Mongoose Filter ---
         const filter: FilterQuery<typeof Despesa> = {};
@@ -121,7 +121,7 @@ export async function GET(request: Request) {
         // Optional: Filter by user
         // filter.createdBy = new Types.ObjectId(session.user.id);
 
-        console.log("[API GET /api/despesas] Filtro MongoDB:", JSON.stringify(filter));
+       
 
         // --- Fetch Data and Count ---
         const [despesasRaw, total] = await Promise.all([
@@ -133,7 +133,7 @@ export async function GET(request: Request) {
                 .lean<any[]>(), // Use lean for performance, type as any[] or create LeanDocument type
             Despesa.countDocuments(filter)
         ]);
-        console.log(`[API GET /api/despesas] Encontradas ${despesasRaw.length} despesas (Total: ${total})`);
+      
 
         // --- Transform Data for Client ---
         const despesasMapped = despesasRaw.map((despesa): ClientDespesa | null => {
@@ -206,19 +206,19 @@ export async function GET(request: Request) {
 
 
 export async function POST(request: Request) {
-    console.log("Requisição POST recebida em /api/despesas");
+    
     try {
         const session = await getServerSession(authOptions);
-        console.log("Sessão do usuário:", session ? `Autenticada (ID: ${session.user?.id})` : "Não autenticada");
+       
         if (!session?.user?.id) {
             console.error("Usuário não autenticado");
             return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
         }
 
         const formData = await request.formData();
-        console.log("Dados recebidos do formulário:");
+       
         for (const [key, value] of formData.entries()) {
-            console.log(`${key}: ${value}`);
+           
         }
 
         // --- Extract and Parse Data ---
@@ -278,11 +278,10 @@ export async function POST(request: Request) {
         }
         // --- End Validation ---
 
-        console.log("Conectando ao banco de dados...");
-        await connectToDatabase();
+      
 
         // --- Fetch Empreendimento Details ---
-        console.log(`Buscando empreendimento com ID: ${empreendimentoId}`);
+       
         const empreendimentoDoc = await Empreendimento.findById(empreendimentoId)
              .select('name folderId sheetId') // Select necessary fields
              .lean<{ _id: Types.ObjectId; name: string; folderId?: string; sheetId?: string }>();
@@ -291,7 +290,7 @@ export async function POST(request: Request) {
             console.error(`Empreendimento não encontrado para ID: ${empreendimentoId}`);
             return NextResponse.json({ error: 'Empreendimento não encontrado.' }, { status: 404 });
         }
-        console.log(`Empreendimento encontrado: ${empreendimentoDoc.name}, folderId: ${empreendimentoDoc.folderId || 'N/A'}, sheetId: ${empreendimentoDoc.sheetId || 'N/A'}`);
+       
 
         // --- Prepare Despesa Data for DB ---
         // Use the validated Date objects
@@ -308,7 +307,7 @@ export async function POST(request: Request) {
         // --- Handle File Upload ---
         let attachmentResult: { fileId?: string; name?: string; url?: string } | null = null;
         if (file && empreendimentoDoc.folderId) {
-            console.log(`Fazendo upload do arquivo: ${file.name} para folder ${empreendimentoDoc.folderId}`);
+            
             try {
                 const buffer = Buffer.from(await file.arrayBuffer());
                 const uploadResult = await uploadFileToDrive(
@@ -319,7 +318,7 @@ export async function POST(request: Request) {
                 if (uploadResult.success && uploadResult.fileId && uploadResult.fileName && uploadResult.webViewLink) {
                     attachmentResult = { fileId: uploadResult.fileId, name: uploadResult.fileName, url: uploadResult.webViewLink };
                     newDespesaData.attachments.push(attachmentResult);
-                    console.log(`Upload para Drive concluído: ${uploadResult.fileName}`);
+                  
                 } else {
                     console.warn('Falha ao fazer upload do anexo para Drive:', uploadResult.error);
                     // Potentially return error or add warning to response
@@ -333,14 +332,14 @@ export async function POST(request: Request) {
         }
 
         // --- Create Despesa in MongoDB ---
-        console.log("Criando despesa no MongoDB...");
+     
         const newDespesa = await Despesa.create(newDespesaData);
-        console.log(`Despesa criada no MongoDB com ID: ${newDespesa._id}`);
+   
 
         // --- Add to Google Sheet ---
         const sheetId = empreendimentoDoc.sheetId;
         if (sheetId) {
-            console.log(`Tentando adicionar despesa ${newDespesa._id} à planilha ${sheetId}`);
+        
             const despesaPlainObject = {
                 _id: newDespesa._id.toString(),
                 description: newDespesa.description,
@@ -358,7 +357,7 @@ export async function POST(request: Request) {
                 if (!sheetResult.success) {
                      console.error('Falha ao adicionar despesa à planilha Google:', sheetResult.error);
                 } else {
-                     console.log(`Despesa ${newDespesa._id} adicionada à planilha na linha: ${sheetResult.updatedRange}`);
+                   
                 }
             } catch (sheetError) {
                 console.error('Erro ao chamar addDespesaToSheet:', sheetError);
@@ -390,7 +389,7 @@ export async function POST(request: Request) {
             updatedAt: newDespesa.updatedAt.toISOString(),
         };
 
-        console.log("Despesa criada com sucesso, retornando resposta...");
+       
         return NextResponse.json({ despesa: createdDespesaObject, message: 'Despesa criada com sucesso' }, { status: 201 });
 
     } catch (error) {

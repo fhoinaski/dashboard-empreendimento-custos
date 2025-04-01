@@ -8,6 +8,12 @@ const userSchema = new Schema({
   role: { type: String, enum: ['admin', 'manager', 'user'], default: 'user' },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
+  activeSessions: [{
+    sessionId: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    lastUsed: { type: Date, default: Date.now },
+    deviceInfo: { type: String }, // Opcional: User-Agent ou IP
+  }],
 });
 
 // Modelo para Empreendimentos

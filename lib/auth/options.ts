@@ -1,14 +1,15 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { compare } from "bcryptjs"; 
-import connectToDatabase from '../db/mongodb'; // Seu arquivo mongoose atual
+import connectToDatabase from '../db/mongodb';
 import { User } from '../db/models';
 import { Model } from "mongoose";
-import { DefaultUser } from "next-auth";
+import { DefaultUser, RequestInternal } from "next-auth";
 
 declare module "next-auth" {
   interface User extends DefaultUser {
     role?: string;
+    sessionId?: string;
   }
   interface Session {
     user: {
@@ -17,11 +18,16 @@ declare module "next-auth" {
       name?: string | null;
       email?: string | null;
       image?: string | null;
+      sessionId?: string;
     }
+  }
+  interface JWT {
+    id?: string;
+    role?: string;
+    sessionId?: string;
   }
 }
 
-// Defina a interface para o usuário se ainda não tiver
 interface IUser {
   _id: any;
   name: string;
@@ -30,11 +36,13 @@ interface IUser {
   role: string;
 }
 
-// Tipagem explícita para o modelo User
 type UserModel = Model<IUser>;
 
+const generateSessionId = () => {
+  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+};
+
 export const authOptions: NextAuthOptions = {
-  // Provedores de autenticação
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -42,86 +50,93 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Senha", type: "password" },
       },
-      async authorize(credentials) {
-        // Verifica se as credenciais foram fornecidas
-        if (!credentials?.email || !credentials?.password) {
+      async authorize(credentials: Record<"email" | "password", string> | undefined, req: Pick<RequestInternal, "body" | "query" | "headers" | "method">) {
+        console.log("[Authorize] Início do processo de autenticação", { credentials, req: req.method });
+        if (!credentials || !credentials.email || !credentials.password) {
+          console.log("[Authorize] Credenciais inválidas ou ausentes", { credentials });
           return null;
         }
         
+        console.log("[Authorize] Credenciais recebidas:", { email: credentials.email });
         try {
-          // Conecta ao banco de dados
           await connectToDatabase();
-          
-          // Busca o usuário no banco de dados - com cast explícito para UserModel
+          console.log("[Authorize] Conexão com MongoDB estabelecida com sucesso");
           const user = await (User as UserModel).findOne({ email: credentials.email });
           
-          // Se o usuário não existir, retorna null
           if (!user) {
-            console.log(`Usuário não encontrado: ${credentials.email}`);
+            console.log("[Authorize] Usuário não encontrado:", credentials.email);
             return null;
           }
           
-          // Verifica se a senha está correta
           const passwordIsValid = await compare(credentials.password, user.password);
-          
-          // Se a senha estiver incorreta, retorna null
           if (!passwordIsValid) {
-            console.log(`Senha inválida para o usuário: ${credentials.email}`);
+            console.log("[Authorize] Senha inválida para:", credentials.email);
             return null;
           }
           
-          // Retorna o usuário
-          console.log(`Login bem-sucedido para: ${credentials.email}`);
+          const sessionId = generateSessionId();
+          console.log("[Authorize] Login bem-sucedido para:", { email: credentials.email, sessionId });
           return {
             id: user._id.toString(),
             email: user.email,
             name: user.name,
             role: user.role,
+            sessionId,
           };
         } catch (error) {
-          console.error("Erro ao autenticar:", error);
+          console.error("[Authorize] Erro ao autenticar:", error);
           return null;
         }
       },
     }),
   ],
   
-  // Configurações da sessão
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24 horas (você pode ajustar conforme necessário)
+    maxAge: 24 * 60 * 60,
   },
   
-  // Páginas personalizadas
   pages: {
     signIn: "/login",
     error: "/login",
   },
   
-  // Callbacks
   callbacks: {
-    // Modifica o token JWT para incluir o id e o papel do usuário
     async jwt({ token, user }) {
+      console.log("[JWT Callback] Antes de atualizar token:", { token, user });
       if (user) {
         token.id = user.id;
         token.role = user.role;
+        token.sessionId = user.sessionId;
       }
+      console.log("[JWT Callback] Após atualizar token:", { token });
       return token;
     },
     
-    // Modifica a sessão para incluir o id e o papel do usuário
     async session({ session, token }) {
+      console.log("[Session Callback] Antes de atualizar sessão:", { session, token });
       if (token && session.user) {
         session.user.id = token.id as string;
         session.user.role = token.role as string;
+        session.user.sessionId = token.sessionId as string | undefined;
       }
+      console.log("[Session Callback] Após atualizar sessão:", { session });
       return session;
     },
   },
   
-  // Configurações secretas
   secret: process.env.NEXTAUTH_SECRET,
-  
-  // Habilitar debug em desenvolvimento
-  debug: process.env.NODE_ENV === "development",
+  debug: true, // Habilitar debug completo para mais logs
+  cookies: {
+    sessionToken: {
+      name: `next-auth.session-token`, // Simplificar o nome para evitar conflitos
+      options: {
+        httpOnly: true,
+        sameSite: "lax", // Usar "lax" para compatibilidade
+        path: "/",
+        secure: false, // Forçar false em localhost
+        domain: "localhost", // Explicitamente localhost
+      },
+    },
+  },
 };

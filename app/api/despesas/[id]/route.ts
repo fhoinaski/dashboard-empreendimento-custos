@@ -89,7 +89,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
    
     try {
         const session = await getServerSession(authOptions); // Use imported authOptions
-        console.log("Sessão do usuário:", session ? `Autenticada (ID: ${session.user?.id})` : "Não autenticada"); // Added optional chaining for user.id
+       
         if (!session) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
 
          const { id } = await params;
@@ -100,9 +100,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         }
 
         const formData = await request.formData();
-        console.log("Dados recebidos do formulário:");
+       
         for (const [key, value] of formData.entries()) {
-            console.log(`${key}: ${value}`);
+           
         }
 
         const description = formData.get('description')?.toString();
@@ -139,10 +139,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod || null; // Use null for empty optional string
         if (notes !== undefined) updateData.notes = notes || null; // Use null for empty optional string
 
-        console.log("Conectando ao banco de dados...");
-        await connectToDatabase();
+    
 
-        console.log(`Buscando despesa com ID: ${id}`);
+        
         // Use PopulatedDespesa type
         const existingDespesa: PopulatedDespesa | null = await Despesa.findById(id) // Use Despesa model
             .populate<{ empreendimento: PopulatedEmpreendimento }>('empreendimento', 'sheetId folderId name'); // Populate name as well
@@ -152,12 +151,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         }
 
         const empreendimento = existingDespesa.empreendimento?.toObject(); // Use toObject() safely
-        console.log(`Empreendimento associado: ${empreendimento?.name || 'Nenhum'}, sheetId: ${empreendimento?.sheetId || 'Nenhum sheetId'}`);
+        
 
         // Handle file upload if provided
         let attachmentResult: Attachment | null = null; // Use Attachment type
         if (file && empreendimento?.folderId) {
-            console.log(`Fazendo upload do arquivo: ${file.name}`);
+           
             try {
                 const buffer = Buffer.from(await file.arrayBuffer());
                 // Use imported uploadFileToDrive
@@ -176,7 +175,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
                     // Adiciona o novo anexo ao array existente
                     // You might want to remove old attachments here if replacing
                     await Despesa.findByIdAndUpdate(id, { $push: { attachments: attachmentResult } }); // Use Despesa model
-                    console.log(`Anexo adicionado à despesa ${id}`);
+                 
                 } else {
                     console.warn('Falha ao fazer upload do anexo:', uploadResult.error || 'Dados ausentes');
                     // Consider returning an error or warning to the user
@@ -192,7 +191,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         }
 
         // Perform the main update operation
-        console.log(`Atualizando despesa ${id} no MongoDB com os dados:`, updateData);
+        
         // Use PopulatedDespesa type
         const updatedDespesa: PopulatedDespesa | null = await Despesa.findByIdAndUpdate( // Use Despesa model
             id,
