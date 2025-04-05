@@ -1,174 +1,208 @@
-// app/api/dashboard/route.ts
+/* ================================== */
+/*       app/api/dashboard/route.ts     */
+/* ================================== */
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from 'next-auth/next';
 import connectToDatabase from "@/lib/db/mongodb";
 import { Empreendimento, Despesa } from "@/lib/db/models";
 import { authOptions } from '@/lib/auth/options';
-import mongoose, { PipelineStage, FilterQuery } from "mongoose"; // Importar tipos
+import mongoose, { PipelineStage, FilterQuery } from "mongoose";
 import { startOfDay, endOfDay, subDays, differenceInDays, addDays } from 'date-fns';
 
-// ... (interfaces DashboardData, calculatePercentageChange - inalteradas) ...
+// Interface Atualizada para incluir totalAllValue/Count
 interface DashboardData {
-  totalEmpreendimentos: number;
-  currentPeriod: {
-    despesasPendentes: number;
-    despesasPendentesCount: number;
-    despesasPagas: number;
-    despesasPagasCount: number;
-    totalDespesas: number;
-    totalDespesasCount: number;
-  };
-  previousPeriod?: {
-    totalDespesas: number;
-    despesasPendentes: number;
-    despesasPagas: number;
-  };
-  comparison?: {
-    totalDespesasChange: number | null;
-    despesasPendentesChange: number | null;
-    despesasPagasChange: number | null;
-  };
-  upcomingExpenses?: {
-      count: number;
-      value: number;
-  };
+    totalEmpreendimentos: number;
+    currentPeriod: {
+        totalApprovedValue: number; totalApprovedCount: number;
+        dueValue: number; dueCount: number;
+        paidValue: number; paidCount: number;
+        totalAllValue: number; totalAllCount: number; // <- NOVO: Total geral registrado no período
+    };
+    previousPeriod?: {
+        totalApprovedValue: number; dueValue: number; paidValue: number;
+        totalAllValue: number; // <- NOVO: Total geral do período anterior para comparação opcional
+    };
+    comparison?: {
+        totalApprovedChange: number | null;
+        dueChange: number | null;
+        paidChange: number | null;
+        // Poderia adicionar comparação para totalAllChange se necessário
+    };
+    pendingApproval?: { count: number; value: number };
+    upcomingExpenses?: { count: number; value: number; };
 }
 
+// Função auxiliar (sem alterações)
 function calculatePercentageChange(current: number, previous: number): number | null {
-    if (previous === 0) {
-        return current > 0 ? 100 : 0;
-    }
     if (previous === 0 && current === 0) return 0;
-    if (previous === 0) return null;
+    if (previous === 0) return current > 0 ? 100 : 0;
     return ((current - previous) / previous) * 100;
 }
 
-
 export async function GET(request: NextRequest) {
-  
     try {
-        // const session = await getServerSession(authOptions);
-        // if (!session) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-
+        const session = await getServerSession(authOptions);
+        if (!session || session.user.role !== 'admin') {
+            return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 });
+        }
         await connectToDatabase();
-        
 
         const { searchParams } = new URL(request.url);
         const toParam = searchParams.get("to");
         const fromParam = searchParams.get("from");
-        const empreendimentoIdParam = searchParams.get("empreendimentoId"); // <-- NOVO: Ler ID do empreendimento
+        const empreendimentoIdParam = searchParams.get("empreendimentoId");
 
         const endDate = toParam ? endOfDay(new Date(toParam)) : endOfDay(new Date());
         const startDate = fromParam ? startOfDay(new Date(fromParam)) : startOfDay(subDays(endDate, 29));
 
-     
-        if (empreendimentoIdParam && empreendimentoIdParam !== 'todos') {
-             
-        }
-
-        // --- Construir Filtro Base ---
-        const baseMatchFilter: FilterQuery<any> = { // Tipagem mais genérica para $match
-            // Usar 'dueDate' ou 'date'? Vamos usar dueDate para focar em vencimentos/pagamentos
-            dueDate: { $gte: startDate, $lte: endDate },
-        };
-        // Adicionar filtro de empreendimento SE fornecido e válido
+        // Filtro Base por Empreendimento
+        const baseEmpreendimentoFilter: FilterQuery<any> = {};
         if (empreendimentoIdParam && empreendimentoIdParam !== 'todos' && mongoose.isValidObjectId(empreendimentoIdParam)) {
-            baseMatchFilter.empreendimento = new mongoose.Types.ObjectId(empreendimentoIdParam);
+            baseEmpreendimentoFilter.empreendimento = new mongoose.Types.ObjectId(empreendimentoIdParam);
         } else if (empreendimentoIdParam && empreendimentoIdParam !== 'todos') {
-             console.warn(`API GET /api/dashboard: ID de empreendimento inválido recebido: ${empreendimentoIdParam}`);
-             // Opcional: retornar erro 400 ou simplesmente ignorar o filtro inválido
-             // return NextResponse.json({ error: "ID de empreendimento inválido" }, { status: 400 });
+            console.warn(`API GET /api/dashboard: ID de empreendimento inválido: ${empreendimentoIdParam}`);
         }
 
-        // --- Buscar Dados do Período Atual com Filtro ---
-        const [empreendimentosCount, currentStats] = await Promise.all([
-             // Contagem total não é afetada pelo filtro de despesa
-            Empreendimento.countDocuments(),
-            Despesa.aggregate([
-                { $match: baseMatchFilter }, // <-- Usa o filtro base (com ou sem empreendimento)
-                {
-                    $group: {
-                        _id: null,
-                        totalDespesasValue: { $sum: '$value' },
-                        totalDespesasCount: { $sum: 1 },
-                        despesasPendentesValue: { $sum: { $cond: [{ $in: ['$status', ['Pendente', 'A vencer']] }, '$value', 0] } },
-                        despesasPendentesCount: { $sum: { $cond: [{ $in: ['$status', ['Pendente', 'A vencer']] }, 1, 0] } },
-                        despesasPagasValue: { $sum: { $cond: [{ $eq: ['$status', 'Pago'] }, '$value', 0] } },
-                        despesasPagasCount: { $sum: { $cond: [{ $eq: ['$status', 'Pago'] }, 1, 0] } }
+        // Agregação Principal (Calcula múltiplos valores em uma passagem)
+        const currentPeriodStats = await Despesa.aggregate([
+            {
+                $match: { // Filtro inicial amplo por data de CRIAÇÃO e empreendimento
+                    createdAt: { $gte: startDate, $lte: endDate }, // Alterado de 'date' para 'createdAt'
+                    ...baseEmpreendimentoFilter
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+
+                    // 1. Soma TOTAL (Independente de status/aprovação/vencimento)
+                    totalAllValue: { $sum: '$value' },
+                    totalAllCount: { $sum: 1 },
+
+                    // 2. Soma APROVADAS (Pago ou A Vencer) COM VENCIMENTO no período
+                    totalApprovedValue: {
+                        $sum: {
+                            $cond: [
+                                { $and: [
+                                    { $in: ['$status', ['Pago', 'A vencer']] },
+                                    { $gte: ['$dueDate', startDate] },
+                                    { $lte: ['$dueDate', endDate] }
+                                ]},
+                                '$value',
+                                0
+                            ]
+                        }
+                    },
+                    totalApprovedCount: {
+                        $sum: { $cond: [ { $and: [ { $in: ['$status', ['Pago', 'A vencer']] }, { $gte: ['$dueDate', startDate] }, { $lte: ['$dueDate', endDate] } ] }, 1, 0 ] }
+                    },
+
+                    // 3. Soma A VENCER (Aprovadas) COM VENCIMENTO no período
+                    dueValue: {
+                        $sum: { $cond: [ { $and: [ { $eq: ['$status', 'A vencer'] }, { $gte: ['$dueDate', startDate] }, { $lte: ['$dueDate', endDate] } ] }, '$value', 0 ] }
+                    },
+                    dueCount: {
+                        $sum: { $cond: [ { $and: [ { $eq: ['$status', 'A vencer'] }, { $gte: ['$dueDate', startDate] }, { $lte: ['$dueDate', endDate] } ] }, 1, 0 ] }
+                    },
+
+                    // 4. Soma PAGAS (Aprovadas) COM VENCIMENTO no período
+                    paidValue: {
+                        $sum: { $cond: [ { $and: [ { $eq: ['$status', 'Pago'] }, { $gte: ['$dueDate', startDate] }, { $lte: ['$dueDate', endDate] } ] }, '$value', 0 ] }
+                    },
+                    paidCount: {
+                        $sum: { $cond: [ { $and: [ { $eq: ['$status', 'Pago'] }, { $gte: ['$dueDate', startDate] }, { $lte: ['$dueDate', endDate] } ] }, 1, 0 ] }
+                    },
+
+                    // 5. Soma AGUARDANDO APROVAÇÃO (criadas no período)
+                    pendingApprovalValue: {
+                        $sum: { $cond: [{ $eq: ['$approvalStatus', 'Pendente'] }, '$value', 0 ] }
+                    },
+                    pendingApprovalCount: {
+                        $sum: { $cond: [{ $eq: ['$approvalStatus', 'Pendente'] }, 1, 0 ] }
                     }
                 }
-            ])
+            }
         ]);
 
-        const currentPeriodData = currentStats[0] || {
-            totalDespesasValue: 0, totalDespesasCount: 0, despesasPendentesValue: 0,
-            despesasPendentesCount: 0, despesasPagasValue: 0, despesasPagasCount: 0,
+        const currentPeriodData = currentPeriodStats[0] || {
+            totalApprovedValue: 0, totalApprovedCount: 0, dueValue: 0, dueCount: 0,
+            paidValue: 0, paidCount: 0, totalAllValue: 0, totalAllCount: 0,
+            pendingApprovalValue: 0, pendingApprovalCount: 0
         };
 
-        // --- (OPCIONAL) Buscar Dados do Período Anterior com Filtro ---
+        // Cálculo Período Anterior (Comparação APROVADAS por VENCIMENTO)
         const daysInPeriod = differenceInDays(endDate, startDate) + 1;
         const prevEndDate = subDays(startDate, 1);
         const prevStartDate = subDays(prevEndDate, daysInPeriod - 1);
 
-        // Criar filtro para período anterior (também inclui empreendimento se selecionado)
         const previousMatchFilter: FilterQuery<any> = {
-             dueDate: { $gte: prevStartDate, $lte: prevEndDate },
-             ...(baseMatchFilter.empreendimento && { empreendimento: baseMatchFilter.empreendimento }) // Reaplica filtro de empreendimento
+            dueDate: { $gte: prevStartDate, $lte: prevEndDate },
+            status: { $in: ['Pago', 'A vencer'] },
+            ...baseEmpreendimentoFilter
         };
 
         const previousStats = await Despesa.aggregate([
-             { $match: previousMatchFilter }, // <-- Usa o filtro do período anterior
-             { $group: {
-                  _id: null,
-                  totalDespesasValue: { $sum: '$value' },
-                  despesasPendentesValue: { $sum: { $cond: [{ $in: ['$status', ['Pendente', 'A vencer']] }, '$value', 0] } },
-                  despesasPagasValue: { $sum: { $cond: [{ $eq: ['$status', 'Pago'] }, '$value', 0] } },
-               }
-             }
+            { $match: previousMatchFilter },
+            { $group: {
+                _id: null,
+                totalApprovedValue: { $sum: '$value' },
+                dueValue: { $sum: { $cond: [{ $eq: ['$status', 'A vencer'] }, '$value', 0] } },
+                paidValue: { $sum: { $cond: [{ $eq: ['$status', 'Pago'] }, '$value', 0] } },
+            }}
         ]);
-
-        const previousPeriodData = previousStats[0] || { totalDespesasValue: 0, despesasPendentesValue: 0, despesasPagasValue: 0 };
+        const previousPeriodData = previousStats[0] || { totalApprovedValue: 0, dueValue: 0, paidValue: 0, totalAllValue: 0 };
 
         const comparisonData = {
-            totalDespesasChange: calculatePercentageChange(currentPeriodData.totalDespesasValue, previousPeriodData.totalDespesasValue),
-            despesasPendentesChange: calculatePercentageChange(currentPeriodData.despesasPendentesValue, previousPeriodData.despesasPendentesValue),
-            despesasPagasChange: calculatePercentageChange(currentPeriodData.despesasPagasValue, previousPeriodData.despesasPagasValue),
+            totalApprovedChange: calculatePercentageChange(currentPeriodData.totalApprovedValue, previousPeriodData.totalApprovedValue),
+            dueChange: calculatePercentageChange(currentPeriodData.dueValue, previousPeriodData.dueValue),
+            paidChange: calculatePercentageChange(currentPeriodData.paidValue, previousPeriodData.paidValue),
         };
 
-         // --- (OPCIONAL) Buscar Próximos Vencimentos (considera filtro de empreendimento) ---
-         const todayStart = startOfDay(new Date());
-         const upcomingEndDate = endOfDay(addDays(todayStart, 7));
-         const upcomingMatchFilter: FilterQuery<any> = {
-             status: { $in: ['Pendente', 'A vencer'] },
-             dueDate: { $gte: todayStart, $lte: upcomingEndDate },
-             ...(baseMatchFilter.empreendimento && { empreendimento: baseMatchFilter.empreendimento }) // Reaplica filtro de empreendimento
-         };
-         const upcomingStats = await Despesa.aggregate([
-              { $match: upcomingMatchFilter },
-              { $group: { _id: null, count: { $sum: 1 }, value: { $sum: '$value'} }}
-         ]);
-         const upcomingExpensesData = upcomingStats[0] || { count: 0, value: 0 };
+        // Cálculo das Despesas A Vencer Próximas
+        const todayStart = startOfDay(new Date());
+        const upcomingEndDate = endOfDay(addDays(todayStart, 7));
+        const upcomingMatchFilter: FilterQuery<any> = {
+            status: 'A vencer', dueDate: { $gte: todayStart, $lte: upcomingEndDate },
+            ...baseEmpreendimentoFilter
+        };
+        const upcomingStats = await Despesa.aggregate([
+            { $match: upcomingMatchFilter },
+            { $group: { _id: null, count: { $sum: 1 }, value: { $sum: '$value'} }}
+        ]);
+        const upcomingExpensesData = upcomingStats[0] || { count: 0, value: 0 };
 
-        // --- Montar Resposta Final ---
+        // Contagem Total de Empreendimentos
+        const empreendimentosCount = await Empreendimento.countDocuments(
+            baseEmpreendimentoFilter.empreendimento ? { _id: baseEmpreendimentoFilter.empreendimento } : {}
+        );
+
+        // Montagem da Resposta Final
         const data: DashboardData = {
             totalEmpreendimentos: empreendimentosCount,
             currentPeriod: {
-                totalDespesas: currentPeriodData.totalDespesasValue,
-                totalDespesasCount: currentPeriodData.totalDespesasCount,
-                despesasPendentes: currentPeriodData.despesasPendentesValue,
-                despesasPendentesCount: currentPeriodData.despesasPendentesCount,
-                despesasPagas: currentPeriodData.despesasPagasValue,
-                despesasPagasCount: currentPeriodData.despesasPagasCount,
+                totalApprovedValue: currentPeriodData.totalApprovedValue,
+                totalApprovedCount: currentPeriodData.totalApprovedCount,
+                dueValue: currentPeriodData.dueValue,
+                dueCount: currentPeriodData.dueCount,
+                paidValue: currentPeriodData.paidValue,
+                paidCount: currentPeriodData.paidCount,
+                totalAllValue: currentPeriodData.totalAllValue,
+                totalAllCount: currentPeriodData.totalAllCount,
             },
             previousPeriod: {
-                 totalDespesas: previousPeriodData.totalDespesasValue,
-                 despesasPendentes: previousPeriodData.despesasPendentesValue,
-                 despesasPagas: previousPeriodData.despesasPagasValue,
+                totalApprovedValue: previousPeriodData.totalApprovedValue,
+                dueValue: previousPeriodData.dueValue,
+                paidValue: previousPeriodData.paidValue,
+                totalAllValue: previousPeriodData.totalAllValue,
             },
             comparison: comparisonData,
+            pendingApproval: {
+                value: currentPeriodData.pendingApprovalValue,
+                count: currentPeriodData.pendingApprovalCount
+            },
             upcomingExpenses: upcomingExpensesData,
         };
-       
+
         return NextResponse.json(data);
 
     } catch (error: unknown) {

@@ -78,14 +78,15 @@ export function UserNav() {
 
   const userName = session.user.name || "Usuário";
   const userEmail = session.user.email || "email@desconhecido.com";
+  const userAvatarUrl = session.user.avatarUrl || "/placeholder-user.jpg";
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="relative h-8 w-8 rounded-full">
           <Avatar className="h-8 w-8">
-            <AvatarImage src="/placeholder-user.jpg" alt="Avatar" />
-            <AvatarFallback>{userName.slice(0, 2).toUpperCase()}</AvatarFallback>
+          <AvatarImage src={session.user.image ?? ""} alt={session.user.name || "Avatar"} />
+          <AvatarFallback>{session.user.name?.[0]}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>

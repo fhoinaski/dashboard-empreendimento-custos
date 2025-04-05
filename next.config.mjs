@@ -1,6 +1,8 @@
+// next.config.mjs
 import nextPWA from 'next-pwa';
 
 const isDev = process.env.NODE_ENV === 'development';
+
 const withPWA = nextPWA({
   dest: 'public',
   register: true,
@@ -26,10 +28,11 @@ const nextConfig = {
     ],
   },
   experimental: {
-    webpackBuildWorker: false,
-    parallelServerBuildTraces: false,
-    parallelServerCompiles: false,
-    serverExternalPackages: ['mongoose'],
+    // Remove serverExternalPackages and replace with the correct option if needed
+    // serverExternalPackages: ['your-packages'],
+    
+    // If you need similar functionality, use serverComponentsExternalPackages instead
+    serverComponentsExternalPackages: ['mongoose', 'mongodb'],
   },
   logging: {
     fetches: {
@@ -47,33 +50,4 @@ const nextConfig = {
   },
 };
 
-// Async function to merge configs
-async function getConfig() {
-  let userConfig = {};
-  try {
-    userConfig = (await import('./v0-user-next.config')).default || {};
-  } catch (e) {
-    console.log('Nenhuma configuração de usuário encontrada');
-  }
-
-  function mergeConfigs(baseConfig, userConfig) {
-    const merged = { ...baseConfig };
-    
-    for (const key in userConfig) {
-      if (userConfig.hasOwnProperty(key)) {
-        if (typeof userConfig[key] === 'object' && !Array.isArray(userConfig[key])) {
-          merged[key] = { ...baseConfig[key], ...userConfig[key] };
-        } else {
-          merged[key] = userConfig[key];
-        }
-      }
-    }
-    
-    return merged;
-  }
-
-  const mergedConfig = mergeConfigs(nextConfig, userConfig);
-  return withPWA(mergedConfig);
-}
-
-export default getConfig();
+export default withPWA(nextConfig);

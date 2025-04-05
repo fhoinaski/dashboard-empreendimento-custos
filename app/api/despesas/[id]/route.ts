@@ -1,350 +1,354 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import mongoose, { Types, Document } from 'mongoose'; // Added Document for type definitions
+import mongoose, { Types, FilterQuery } from 'mongoose';
 import connectToDatabase from '@/lib/db/mongodb';
-import { Despesa, Empreendimento } from '@/lib/db/models'; // Import Models
-import { authOptions } from '@/lib/auth/options'; // Import authOptions
-import { uploadFileToDrive, deleteFileFromDrive } from '@/lib/google/drive'; // Import Drive functions
-import { updateDespesaInSheet, deleteDespesaFromSheet } from '@/lib/google/sheets'; // Import Sheets functions
+import { Despesa, Empreendimento, User, DespesaDocument } from '@/lib/db/models';
+import { authOptions } from '@/lib/auth/options';
+import { updateDespesaInSheet, deleteDespesaFromSheet } from '@/lib/google/sheets';
+import { uploadFileToDrive } from '@/lib/google/drive'; // Assuming Drive
 
-// --- INTERFACES (Define missing types here or move to a shared types file) ---
-interface Attachment {
-    _id?: Types.ObjectId | string; // Optional _id from MongoDB
-    fileId?: string;
-    name?: string;
-    url?: string;
+// --- Tipagem para o objeto Lean populado ---
+// (Necessário para ajudar o TypeScript com .lean() e .populate())
+interface PopulatedLeanDespesa extends Omit<DespesaDocument, 'empreendimento' | 'createdBy' | 'reviewedBy'> {
+    _id: Types.ObjectId; // Garante que _id é ObjectId antes do lean
+    empreendimento?: { _id: Types.ObjectId; name: string; sheetId?: string; folderId?: string };
+    createdBy?: { _id: Types.ObjectId; name: string };
+    reviewedBy?: { _id: Types.ObjectId; name: string };
 }
 
-// Interface for a populated Empreendimento (adjust fields as needed)
-interface PopulatedEmpreendimento extends Document { // Extend Mongoose Document
-    _id: Types.ObjectId;
-    name: string;
-    sheetId?: string;
-    folderId?: string;
-    // Add other fields if populated and accessed
-    toObject(): any; // Add toObject method signature
+// Interface para a resposta do cliente (mantida)
+interface ClientDespesa {
+    _id: string; description: string; value: number; date: string; dueDate: string;
+    status: string; approvalStatus: string; category: string; notes?: string | null; paymentMethod?: string;
+    empreendimento: { _id: string; name: string; };
+    createdBy?: { _id: string; name: string; };
+    reviewedBy?: { _id: string; name: string; };
+    reviewedAt?: string | null; // Permitir null
+    attachments?: Array<{ fileId?: string; name?: string; url?: string; _id?: string }>;
+    createdAt: string; updatedAt: string;
 }
 
-// Interface for a populated Despesa
-interface PopulatedDespesa extends Document { // Extend Mongoose Document
-    _id: Types.ObjectId;
-    description: string;
-    value: number;
-    date: Date;
-    dueDate: Date;
-    status: string;
-    category: string;
-    paymentMethod?: string;
-    notes?: string;
-    empreendimento?: PopulatedEmpreendimento | null; // Reference populated empreendimento
-    attachments?: Attachment[];
-    createdAt: Date;
-    updatedAt: Date;
-    // Add other fields if needed (createdBy, etc.)
-    toObject(): any; // Add toObject method signature
-}
-
-// Interface for update data in PUT request
-interface DespesaUpdateData {
-    updatedAt: Date;
-    description?: string;
-    value?: number;
-    date?: Date;
-    dueDate?: Date;
-    status?: string;
-    category?: string;
-    paymentMethod?: string | null; // Allow null if optional
-    notes?: string | null; // Allow null if optional
-    // attachments are handled separately via $push
-}
-// --- END INTERFACES ---
-
-// --- GET ---
-export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+// --- GET Handler ---
+export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     try {
-        const session = await getServerSession(authOptions); // Use imported authOptions
-        if (!session) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+        const session = await getServerSession(authOptions);
+        if (!session?.user?.id) {
+            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+        }
+        const userId = new Types.ObjectId(session.user.id);
+        const userRole = session.user.role;
 
-        const { id } = await params;
-
-        if (!mongoose.isValidObjectId(id)) return NextResponse.json({ error: 'ID inválido' }, { status: 400 });
-
-        await connectToDatabase();
-        // Use PopulatedDespesa type hint here
-        const despesa: PopulatedDespesa | null = await Despesa.findById(id) // Use imported Despesa model
-            .populate<{ empreendimento: PopulatedEmpreendimento }>('empreendimento', 'name sheetId folderId'); // Use PopulatedEmpreendimento type
-
-        if (!despesa) return NextResponse.json({ error: 'Despesa não encontrada' }, { status: 404 });
-
-        return NextResponse.json({ despesa: despesa.toObject() }); // Use toObject for plain JS object
-    } catch (error) {
-        console.error('Erro ao buscar despesa:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-        return NextResponse.json({ error: 'Erro ao buscar despesa', details: errorMessage }, { status: 500 });
-    }
-}
-
-// --- PUT ---
-export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-   
-    try {
-        const session = await getServerSession(authOptions); // Use imported authOptions
-       
-        if (!session) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-
-         const { id } = await params;
+        const resolvedParams = await params;
+        const { id } = resolvedParams;
 
         if (!mongoose.isValidObjectId(id)) {
-            console.error(`ID inválido: ${id}`);
             return NextResponse.json({ error: 'ID inválido' }, { status: 400 });
         }
 
-        const formData = await request.formData();
-       
-        for (const [key, value] of formData.entries()) {
-           
+        await connectToDatabase();
+
+        const despesaDoc = await Despesa.findById(id)
+            .populate<{ empreendimento: { _id: Types.ObjectId; name: string } }>("empreendimento", "name _id")
+            .populate<{ createdBy: { _id: Types.ObjectId; name: string } }>("createdBy", "name _id")
+            .populate<{ reviewedBy: { _id: Types.ObjectId; name: string } }>("reviewedBy", "name _id")
+            .lean<PopulatedLeanDespesa | null>(); // Use a tipagem PopulatedLeanDespesa
+
+        if (!despesaDoc) {
+            return NextResponse.json({ error: 'Despesa não encontrada' }, { status: 404 });
         }
 
-        const description = formData.get('description')?.toString();
-        const valueStr = formData.get('value')?.toString();
-        const value = valueStr ? parseFloat(valueStr.replace(',', '.')) : NaN; // Handle comma as decimal separator
-        const dateStr = formData.get('date')?.toString();
-        const dueDateStr = formData.get('dueDate')?.toString();
-        const status = formData.get('status')?.toString();
-        const category = formData.get('category')?.toString();
-        const paymentMethod = formData.get('paymentMethod')?.toString();
-        const notes = formData.get('notes')?.toString();
-        const file = formData.get('file') as File | null;
+        // --- RBAC Check for Viewing ---
+        const canView =
+            userRole === 'admin' ||
+            userRole === 'manager' ||
+            (userRole === 'user' && despesaDoc.createdBy?._id.equals(userId)); // User can see their own
 
-        // Use DespesaUpdateData type
-        const updateData: DespesaUpdateData = {
-            updatedAt: new Date(),
+        if (!canView) {
+            return NextResponse.json({ error: 'Acesso negado a esta despesa' }, { status: 403 });
+        }
+        // --- End RBAC Check ---
+
+        const responseDespesa: ClientDespesa = {
+            _id: despesaDoc._id.toString(),
+            description: despesaDoc.description,
+            value: despesaDoc.value,
+            date: despesaDoc.date instanceof Date ? despesaDoc.date.toISOString() : new Date().toISOString(),
+            dueDate: despesaDoc.dueDate instanceof Date ? despesaDoc.dueDate.toISOString() : new Date().toISOString(),
+            status: despesaDoc.status,
+            approvalStatus: despesaDoc.approvalStatus,
+            category: despesaDoc.category,
+            notes: despesaDoc.notes ?? null,
+            paymentMethod: despesaDoc.paymentMethod,
+            empreendimento: {
+                _id: despesaDoc.empreendimento?._id.toString() ?? '',
+                name: despesaDoc.empreendimento?.name ?? 'N/A',
+            },
+            createdBy: despesaDoc.createdBy ? {
+                _id: despesaDoc.createdBy._id.toString(),
+                name: despesaDoc.createdBy.name,
+            } : undefined,
+            reviewedBy: despesaDoc.reviewedBy ? {
+                _id: despesaDoc.reviewedBy._id.toString(),
+                name: despesaDoc.reviewedBy.name,
+            } : undefined,
+            reviewedAt: despesaDoc.reviewedAt instanceof Date ? despesaDoc.reviewedAt.toISOString() : null,
+            attachments: despesaDoc.attachments?.map((att) => ({
+                fileId: att.fileId,
+                name: att.name,
+                url: att.url,
+                _id: att._id?.toString(),
+            })) ?? [],
+            createdAt: despesaDoc.createdAt instanceof Date ? despesaDoc.createdAt.toISOString() : new Date().toISOString(),
+            updatedAt: despesaDoc.updatedAt instanceof Date ? despesaDoc.updatedAt.toISOString() : new Date().toISOString(),
         };
-        if (description !== undefined) updateData.description = description;
-        if (!isNaN(value)) updateData.value = value;
-        // Parse dates carefully
-        try {
-            if (dateStr) updateData.date = new Date(dateStr);
-            if (dueDateStr) updateData.dueDate = new Date(dueDateStr);
-            if ((updateData.date && isNaN(updateData.date.getTime())) || (updateData.dueDate && isNaN(updateData.dueDate.getTime()))) {
-                throw new Error("Formato de data inválido recebido.");
+
+
+        return NextResponse.json({ despesa: responseDespesa });
+    } catch (error) {
+        console.error(`Erro em GET /api/despesas/${params ? (await params).id : 'invalid'}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Erro interno do servidor';
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
+    }
+}
+
+// --- PUT Handler ---
+export async function PUT(request: NextRequest, { params }: { params: Promise< { id: string }> }) {
+    const resolvedParams = await params;
+    const { id } = resolvedParams;
+    if (!mongoose.isValidObjectId(id)) {
+        return NextResponse.json({ error: 'ID de despesa inválido' }, { status: 400 });
+    }
+
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user?.id) {
+            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+        }
+        const userId = new Types.ObjectId(session.user.id);
+        const userRole = session.user.role;
+
+        await connectToDatabase();
+        const despesaToUpdate = await Despesa.findById(id);
+
+        if (!despesaToUpdate) {
+            return NextResponse.json({ error: 'Despesa não encontrada' }, { status: 404 });
+        }
+
+        // --- RBAC Check for Editing ---
+        const isCreator = despesaToUpdate.createdBy.equals(userId);
+        const isPending = despesaToUpdate.approvalStatus === 'Pendente';
+        const canEdit =
+            userRole === 'admin' || // Admin can edit anytime (perhaps with restrictions later?)
+            (isCreator && isPending); // Creator can edit only if pending approval
+
+        if (!canEdit) {
+            return NextResponse.json({ error: 'Você não tem permissão para editar esta despesa neste estado.' }, { status: 403 });
+        }
+        // --- End RBAC Check ---
+
+        const formData = await request.formData();
+        const updateData: { [key: string]: any } = { updatedAt: new Date() };
+        let newFile: File | null = null;
+
+        // Process form fields
+        for (const [key, value] of formData.entries()) {
+            if (key === 'file') {
+                if (value instanceof File && value.size > 0) {
+                    newFile = value;
+                    // Validate file (type/size) - simplistic example
+                     const allowedTypes = ["image/jpeg", "image/png", "image/gif", "application/pdf"];
+                     const maxSize = 10 * 1024 * 1024; // 10MB
+                     if (!allowedTypes.includes(value.type)) return NextResponse.json({ error: `Tipo de arquivo inválido.` }, { status: 400 });
+                     if (value.size > maxSize) return NextResponse.json({ error: `Arquivo muito grande.` }, { status: 400 });
+                }
+            } else if (typeof value === 'string') {
+                if (key === 'value') {
+                    const numValue = parseFloat(value.replace(',', '.'));
+                    if (!isNaN(numValue)) updateData[key] = numValue;
+                } else if (key === 'date' || key === 'dueDate') {
+                    const dateValue = new Date(value);
+                    if (!isNaN(dateValue.getTime())) updateData[key] = dateValue;
+                } else if (key === 'status' && !['Pago', 'Pendente', 'A vencer'].includes(value)) {
+                    // Allow only specific status updates if not admin? For now, let API handle
+                    // Ignore invalid status potentially sent by non-admins modifying payload
+                    if (userRole === 'admin' || isCreator) { // Let admin/creator change status
+                        updateData[key] = value;
+                    }
+                }
+                 else {
+                    updateData[key] = value;
+                }
             }
-        } catch (dateError) {
-            console.error("Erro ao parsear datas:", dateError);
-            return NextResponse.json({ error: 'Formato de data inválido.' }, { status: 400 });
         }
 
-        if (status) updateData.status = status;
-        if (category) updateData.category = category;
-        if (paymentMethod !== undefined) updateData.paymentMethod = paymentMethod || null; // Use null for empty optional string
-        if (notes !== undefined) updateData.notes = notes || null; // Use null for empty optional string
 
-    
+        // Handle File Upload only if a new file was provided
+        if (newFile) {
+            const empreendimento = await Empreendimento.findById(despesaToUpdate.empreendimento).select('folderId');
+            if (!empreendimento?.folderId) {
+                return NextResponse.json({ error: 'Pasta do empreendimento no Drive não encontrada para upload.' }, { status: 400 });
+            }
 
-        
-        // Use PopulatedDespesa type
-        const existingDespesa: PopulatedDespesa | null = await Despesa.findById(id) // Use Despesa model
-            .populate<{ empreendimento: PopulatedEmpreendimento }>('empreendimento', 'sheetId folderId name'); // Populate name as well
-        if (!existingDespesa) {
-            console.error(`Despesa não encontrada para ID: ${id}`);
-            return NextResponse.json({ error: 'Despesa não encontrada para atualização' }, { status: 404 });
-        }
-
-        const empreendimento = existingDespesa.empreendimento?.toObject(); // Use toObject() safely
-        
-
-        // Handle file upload if provided
-        let attachmentResult: Attachment | null = null; // Use Attachment type
-        if (file && empreendimento?.folderId) {
-           
             try {
-                const buffer = Buffer.from(await file.arrayBuffer());
-                // Use imported uploadFileToDrive
+                const buffer = Buffer.from(await newFile.arrayBuffer());
                 const uploadResult = await uploadFileToDrive(
-                    { buffer, originalname: file.name, mimetype: file.type },
+                    { buffer, originalname: newFile.name, mimetype: newFile.type },
                     empreendimento.folderId,
-                    'Despesas' // Assumindo que a categoria é Despesas para o anexo
+                    'Despesas' // Or use existing category if needed
                 );
-
-                if (uploadResult.success && uploadResult.fileId && uploadResult.webViewLink && uploadResult.fileName) {
-                    attachmentResult = { // Assign to Attachment type
-                        fileId: uploadResult.fileId,
-                        name: uploadResult.fileName,
-                        url: uploadResult.webViewLink,
-                    };
-                    // Adiciona o novo anexo ao array existente
-                    // You might want to remove old attachments here if replacing
-                    await Despesa.findByIdAndUpdate(id, { $push: { attachments: attachmentResult } }); // Use Despesa model
-                 
+                if (uploadResult.success && uploadResult.fileId && uploadResult.fileName && uploadResult.webViewLink) {
+                    // Replace existing attachments or add if none existed
+                    updateData.attachments = [{ fileId: uploadResult.fileId, name: uploadResult.fileName, url: uploadResult.webViewLink }];
                 } else {
-                    console.warn('Falha ao fazer upload do anexo:', uploadResult.error || 'Dados ausentes');
-                    // Consider returning an error or warning to the user
-                    // return NextResponse.json({ error: 'Falha ao fazer upload do anexo', details: uploadResult.error }, { status: 500 });
+                    console.warn('Falha no upload do novo anexo:', uploadResult.error);
+                    // Decide se continua ou retorna erro
                 }
             } catch (uploadError) {
-                console.error("Erro durante upload do anexo:", uploadError);
-                 // Consider returning an error or warning to the user
-                 // return NextResponse.json({ error: 'Erro interno durante upload do anexo' }, { status: 500 });
+                console.error("Erro durante o upload do novo anexo:", uploadError);
+                return NextResponse.json({ error: 'Erro ao fazer upload do novo anexo' }, { status: 500 });
             }
-        } else if (file && !empreendimento?.folderId) {
-             console.warn(`Tentativa de upload de anexo para despesa ${id}, mas o empreendimento não possui folderId.`);
         }
 
-        // Perform the main update operation
-        
-        // Use PopulatedDespesa type
-        const updatedDespesa: PopulatedDespesa | null = await Despesa.findByIdAndUpdate( // Use Despesa model
+
+        // Perform the update
+        const updatedDespesaDoc = await Despesa.findByIdAndUpdate(
             id,
-            updateData, // Pass the update data object
+            { $set: updateData }, // Use $set to only update provided fields
             { new: true, runValidators: true }
-        ).populate<{ empreendimento: PopulatedEmpreendimento }>('empreendimento', 'sheetId folderId name'); // Populate name too
+        )
+        .populate<{ empreendimento: { _id: Types.ObjectId; name: string; sheetId?: string } }>("empreendimento", "name _id sheetId")
+        .populate<{ createdBy: { _id: Types.ObjectId; name: string } }>("createdBy", "name _id")
+        .populate<{ reviewedBy: { _id: Types.ObjectId; name: string } }>("reviewedBy", "name _id")
+        .lean<PopulatedLeanDespesa | null>(); // Use lean and the correct type
 
-        if (!updatedDespesa) {
-            console.error(`Falha ao atualizar despesa ${id}: não encontrada após tentativa`);
-            return NextResponse.json({ error: 'Falha ao atualizar a despesa (não encontrada após tentativa)' }, { status: 404 });
+
+        if (!updatedDespesaDoc) {
+            return NextResponse.json({ error: "Falha ao atualizar despesa" }, { status: 500 });
         }
-        console.log(`Despesa ${id} atualizada no MongoDB`);
 
-        // Update Google Sheet if sheetId exists
-        const updatedEmpreendimentoObj = updatedDespesa.empreendimento?.toObject(); // Use toObject()
-        const sheetId = updatedEmpreendimentoObj?.sheetId;
 
+        // Update Google Sheet (if applicable)
+        const sheetId = updatedDespesaDoc.empreendimento?.sheetId;
         if (sheetId) {
-             console.log(`Tentando atualizar despesa ${id} na planilha ${sheetId}`);
-             try {
-                // Prepare the plain object for the sheet function
-                const despesaForSheet = {
-                    _id: updatedDespesa._id.toString(),
-                    description: updatedDespesa.description,
-                    value: updatedDespesa.value,
-                    date: updatedDespesa.date,
-                    dueDate: updatedDespesa.dueDate,
-                    status: updatedDespesa.status,
-                    category: updatedDespesa.category,
-                    paymentMethod: updatedDespesa.paymentMethod || '',
-                    notes: updatedDespesa.notes || '',
-                };
-
-                 // Use imported updateDespesaInSheet
-                 const sheetResult = await updateDespesaInSheet(sheetId, id, despesaForSheet);
-                 if (!sheetResult.success) {
-                     console.warn('Falha ao atualizar despesa na planilha:', sheetResult.error);
-                     // Consider not failing the whole request, maybe return a partial success message
-                 } else {
-                     console.log(`Despesa ${id} atualizada na planilha com sucesso na linha ${sheetResult.updatedRow}`);
-                 }
-             } catch (sheetError) {
-                 console.error('Erro ao interagir com a planilha:', sheetError);
-                  // Consider not failing the whole request
-             }
-        } else {
-             console.warn(`Nenhum sheetId encontrado para o empreendimento associado à despesa ${id}`);
+            const despesaForSheet = {
+                _id: updatedDespesaDoc._id.toString(),
+                description: updatedDespesaDoc.description,
+                value: updatedDespesaDoc.value,
+                date: updatedDespesaDoc.date,
+                dueDate: updatedDespesaDoc.dueDate,
+                status: updatedDespesaDoc.status,
+                category: updatedDespesaDoc.category,
+                paymentMethod: updatedDespesaDoc.paymentMethod || '',
+                notes: updatedDespesaDoc.notes || '',
+            };
+            try {
+                const sheetResult = await updateDespesaInSheet(sheetId, id, despesaForSheet);
+                if (!sheetResult.success && 'error' in sheetResult) console.warn('[API PUT Despesa] Falha ao atualizar Google Sheet:', sheetResult.error);
+            } catch(sheetError) { console.error('[API PUT Despesa] Erro ao chamar updateDespesaInSheet:', sheetError); }
         }
 
-        // Prepare the final response object
-        const finalDespesaObject = updatedDespesa.toObject();
-        // Ensure the newly added attachment is included if it was uploaded in this request
-        if (attachmentResult && !finalDespesaObject.attachments?.some((att: Attachment) => att.fileId === attachmentResult?.fileId)) {
-             finalDespesaObject.attachments = [...(finalDespesaObject.attachments || []), attachmentResult];
-        }
+        // --- Prepare Client Response Object ---
+        // Now updatedDespesaDoc is guaranteed to be PopulatedLeanDespesa
+        const responseDespesa: ClientDespesa = {
+            _id: updatedDespesaDoc._id.toString(), // Safe to call toString()
+            description: updatedDespesaDoc.description,
+            value: updatedDespesaDoc.value,
+            date: updatedDespesaDoc.date instanceof Date ? updatedDespesaDoc.date.toISOString() : new Date().toISOString(),
+            dueDate: updatedDespesaDoc.dueDate instanceof Date ? updatedDespesaDoc.dueDate.toISOString() : new Date().toISOString(),
+            status: updatedDespesaDoc.status,
+            approvalStatus: updatedDespesaDoc.approvalStatus,
+            category: updatedDespesaDoc.category,
+            notes: updatedDespesaDoc.notes ?? null,
+            paymentMethod: updatedDespesaDoc.paymentMethod,
+            empreendimento: {
+                _id: updatedDespesaDoc.empreendimento?._id.toString() ?? '',
+                name: updatedDespesaDoc.empreendimento?.name ?? 'N/A',
+            },
+            createdBy: updatedDespesaDoc.createdBy ? {
+                _id: updatedDespesaDoc.createdBy._id.toString(),
+                name: updatedDespesaDoc.createdBy.name,
+            } : undefined,
+            reviewedBy: updatedDespesaDoc.reviewedBy ? {
+                _id: updatedDespesaDoc.reviewedBy._id.toString(),
+                name: updatedDespesaDoc.reviewedBy.name,
+            } : undefined,
+            reviewedAt: updatedDespesaDoc.reviewedAt instanceof Date ? updatedDespesaDoc.reviewedAt.toISOString() : null,
+            attachments: updatedDespesaDoc.attachments?.map((att) => ({
+                fileId: att.fileId,
+                name: att.name,
+                url: att.url,
+                _id: att._id?.toString(),
+            })) ?? [],
+            createdAt: updatedDespesaDoc.createdAt instanceof Date ? updatedDespesaDoc.createdAt.toISOString() : new Date().toISOString(),
+            updatedAt: updatedDespesaDoc.updatedAt instanceof Date ? updatedDespesaDoc.updatedAt.toISOString() : new Date().toISOString(),
+        };
 
-        return NextResponse.json({
-            despesa: finalDespesaObject,
-            attachment: attachmentResult, // Returns info of the attachment just added (if any)
-        });
+
+        return NextResponse.json({ despesa: responseDespesa, message: "Despesa atualizada com sucesso." }, { status: 200 });
 
     } catch (error) {
-        console.error('Erro ao atualizar despesa:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-        return NextResponse.json({ error: 'Erro interno ao atualizar despesa', details: errorMessage }, { status: 500 });
+        console.error(`Erro em PUT /api/despesas/${id}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Erro interno do servidor ao atualizar despesa.';
+         if (error instanceof mongoose.Error.ValidationError) { return NextResponse.json({ error: 'Dados inválidos', details: error.errors }, { status: 400 }); }
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
     }
 }
 
 
-// --- DELETE ---
-export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-     try {
-         const session = await getServerSession(authOptions); // Use imported authOptions
-         if (!session) {
-             return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-         }
+// --- DELETE Handler ---
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+    const resolvedParams = await params;
+    const { id } = resolvedParams;
+    if (!mongoose.isValidObjectId(id)) {
+        return NextResponse.json({ error: 'ID inválido' }, { status: 400 });
+    }
 
-         const { id } = await params;
+    try {
+        const session = await getServerSession(authOptions);
+        if (!session?.user?.id) {
+            return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+        }
+        const userId = new Types.ObjectId(session.user.id);
+        const userRole = session.user.role;
 
-         if (!mongoose.isValidObjectId(id)) {
-             return NextResponse.json({ error: 'ID inválido' }, { status: 400 });
-         }
+        await connectToDatabase();
+        const despesaToDelete = await Despesa.findById(id).populate<{ empreendimento: { sheetId?: string } }>('empreendimento', 'sheetId');
 
-         await connectToDatabase();
+        if (!despesaToDelete) {
+            return NextResponse.json({ error: 'Despesa não encontrada' }, { status: 404 });
+        }
 
-         // Fetch the expense BEFORE deleting to get sheetId and attachments
-         // Use PopulatedDespesa type
-         const despesa: PopulatedDespesa | null = await Despesa.findById(id) // Use Despesa model
-             .populate<{ empreendimento: PopulatedEmpreendimento }>('empreendimento', 'sheetId'); // Only need sheetId
+        // --- RBAC Check for Deletion ---
+        const isCreator = despesaToDelete.createdBy.equals(userId);
+        const isPending = despesaToDelete.approvalStatus === 'Pendente';
+        const canDelete =
+            userRole === 'admin' || // Admin can delete anytime
+            (isCreator && isPending); // Creator can delete only if pending approval
 
-         if (!despesa) {
-             return NextResponse.json({ error: 'Despesa não encontrada para exclusão' }, { status: 404 });
-         }
+        if (!canDelete) {
+            return NextResponse.json({ error: 'Você não tem permissão para excluir esta despesa.' }, { status: 403 });
+        }
+        // --- End RBAC Check ---
 
-         const sheetId = despesa.empreendimento?.sheetId;
-         const attachments = despesa.attachments || []; // Ensure it's an array
+        // Delete from DB
+        await Despesa.findByIdAndDelete(id);
 
-         // --- Delete from Sheet ---
-         if (sheetId) {
-             console.log(`[DELETE /api/despesas/${id}] Tentando excluir da planilha ${sheetId}`);
+        // Delete from Google Sheet (if applicable)
+        const sheetId = despesaToDelete.empreendimento?.sheetId;
+        if (sheetId) {
              try {
-                 // Use imported deleteDespesaFromSheet
                  const sheetResult = await deleteDespesaFromSheet(sheetId, id);
-                 if (!sheetResult.success) {
-                     console.warn(`[DELETE /api/despesas/${id}] Falha ao excluir da planilha:`, sheetResult.error);
-                     // Continue even if sheet deletion fails
-                 } else {
-                      console.log(`[DELETE /api/despesas/${id}] Excluído da planilha (linha ${sheetResult.deletedRow}).`);
-                 }
-             } catch (sheetError) {
-                 console.error(`[DELETE /api/despesas/${id}] Erro ao interagir com planilha para exclusão:`, sheetError);
-             }
-         } else {
-              console.log(`[DELETE /api/despesas/${id}] Nenhuma planilha associada para excluir.`);
-         }
+                 if (!sheetResult.success) console.warn(`[API DELETE Despesa] Falha ao excluir do Google Sheet ${sheetId}:`, sheetResult.error);
+                 else console.log(`[API DELETE Despesa] Linha referente a ${id} excluída da Sheet ${sheetId}`);
+             } catch(sheetError) { console.error('[API DELETE Despesa] Erro ao chamar deleteDespesaFromSheet:', sheetError); }
+        } else { console.warn(`[API DELETE Despesa] Sem sheetId para empreendimento. Sheet não atualizada.`); }
 
-         // --- Delete Attachments from Drive ---
-         if (attachments.length > 0) {
-             console.log(`[DELETE /api/despesas/${id}] Excluindo ${attachments.length} anexo(s) do Drive...`);
-             try {
-                 const deletionPromises = attachments.map(async (attachment: Attachment) => { // Use Attachment type
-                     if (attachment.fileId) {
-                         console.log(`  -> Excluindo Drive ID: ${attachment.fileId}`);
-                         // Use imported deleteFileFromDrive
-                         const deleteResult = await deleteFileFromDrive(attachment.fileId);
-                         if (!deleteResult.success) {
-                             console.warn(`     Falha ao excluir anexo ${attachment.name || attachment.fileId}: ${deleteResult.error}`);
-                         }
-                         return deleteResult;
-                     }
-                     return { success: true }; // Skip if no fileId
-                 });
-                 await Promise.all(deletionPromises);
-                 console.log(`[DELETE /api/despesas/${id}] Exclusão de anexos do Drive concluída (ou tentada).`);
-             } catch (driveError) {
-                 console.error(`[DELETE /api/despesas/${id}] Erro durante exclusão de anexos do Drive:`, driveError);
-                 // Continue even if Drive deletion fails
-             }
-         } else {
-              console.log(`[DELETE /api/despesas/${id}] Nenhum anexo para excluir do Drive.`);
-         }
+        // TODO: Consider deleting attachment from Google Drive? Requires fileId and potentially more complex logic.
 
-         // --- Delete from MongoDB ---
-         console.log(`[DELETE /api/despesas/${id}] Excluindo do MongoDB...`);
-         await Despesa.findByIdAndDelete(id); // Use Despesa model
-         console.log(`[DELETE /api/despesas/${id}] Excluído do MongoDB com sucesso.`);
-
-         return NextResponse.json({ message: 'Despesa excluída com sucesso', id });
-
-     } catch (error) {
-         console.error(`[DELETE /api/despesas/{id}] Erro geral:`, error);
-         const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao excluir despesa';
-         return NextResponse.json({ error: 'Erro interno ao excluir despesa', details: errorMessage }, { status: 500 });
-     }
- }
-
+        return NextResponse.json({ message: 'Despesa excluída com sucesso', id }, { status: 200 });
+    } catch (error) {
+        console.error(`Erro em DELETE /api/despesas/${id}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Erro interno do servidor ao excluir despesa.';
+        return NextResponse.json({ error: errorMessage }, { status: 500 });
+    }
+}
