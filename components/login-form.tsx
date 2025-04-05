@@ -6,7 +6,7 @@ import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Building2, Loader2 } from "lucide-react"; // Import Loader2
+import { Building2, Loader2 } from "lucide-react";
 import { signIn, useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -23,18 +23,17 @@ export default function LoginForm() {
   const [loginError, setLoginError] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
-  // useSession ainda pode ser útil para *impedir* que a tela de login seja mostrada
-  // se o usuário já estiver autenticado ao carregar a página /login diretamente.
   const { status } = useSession();
 
+  // Redireciona se já autenticado
   useEffect(() => {
-    // Se já estiver autenticado ao carregar a página, redireciona
     if (status === "authenticated") {
       console.log("[LoginForm] Usuário já autenticado, redirecionando para /dashboard");
-      router.replace("/dashboard"); // Use replace para não adicionar ao histórico
+      router.replace("/dashboard");
+      // Garante que o estado de carregamento seja resetado quando o status muda para authenticated
+      setIsLoading(false);
     }
   }, [status, router]);
-
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -51,26 +50,28 @@ export default function LoginForm() {
 
     try {
       const result = await signIn("credentials", {
-        redirect: false, // Essencial: Não deixa o NextAuth redirecionar automaticamente
+        redirect: false,
         email: values.email,
         password: values.password,
+        callbackUrl: "/dashboard", // Define a URL de retorno
       });
 
       console.log("[LoginForm] Resultado do signIn:", result);
 
-      // Verifica se o login foi bem-sucedido E se não houve erro
       if (result?.ok && !result.error) {
         toast({
           title: "Login bem-sucedido",
           description: "Redirecionando para o dashboard...",
         });
         console.log("[LoginForm] Login OK, redirecionando para /dashboard...");
-        // Redireciona programaticamente após o sucesso
+        // Força a atualização da sessão no cliente
         router.push("/dashboard");
-        // O refresh pode não ser necessário se a estrutura do layout carregar dados baseados na sessão atualizada
-        // router.refresh(); // Descomente se for necessário forçar a recarga dos dados do servidor no dashboard
+        router.refresh(); // Garante que o estado da sessão seja atualizado
+        // Importante: resetar o estado de carregamento após login bem-sucedido
+        setIsLoading(false);
+        // Importante: resetar o estado de carregamento após login bem-sucedido
+        setIsLoading(false);
       } else {
-        // Trata o erro de login
         const errorMessage = result?.error || "Email ou senha incorretos";
         console.error("[LoginForm] Erro na autenticação:", errorMessage);
         setLoginError(true);
@@ -79,39 +80,32 @@ export default function LoginForm() {
           title: "Erro de autenticação",
           description: errorMessage,
         });
-        setIsLoading(false); // Para o loading no erro
+        setIsLoading(false);
       }
     } catch (error) {
-      // Trata erros inesperados (ex: rede)
       console.error("[LoginForm] Erro inesperado durante o signIn:", error);
       toast({
         variant: "destructive",
         title: "Erro de conexão",
         description: "Não foi possível conectar ao servidor. Tente novamente.",
       });
-      setIsLoading(false); // Para o loading no erro
+      setIsLoading(false);
     }
-    // Não definimos setIsLoading(false) aqui no caso de sucesso,
-    // pois o redirecionamento já vai desmontar o componente.
   }
 
-  // Se a sessão ainda está carregando, pode mostrar um loader simples
   if (status === "loading") {
-     return (
-         <div className="w-full max-w-md p-8 bg-background rounded-xl shadow-lg flex flex-col items-center justify-center min-h-[300px]">
-             <Loader2 className="h-8 w-8 animate-spin text-primary"/>
-             <p className="text-muted-foreground mt-4">Verificando sessão...</p>
-         </div>
-     );
+    return (
+      <div className="w-full max-w-md p-8 bg-background rounded-xl shadow-lg flex flex-col items-center justify-center min-h-[300px]">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-muted-foreground mt-4">Verificando sessão...</p>
+      </div>
+    );
   }
 
-  // Se já autenticado, não renderiza o formulário (já redirecionado pelo useEffect)
   if (status === "authenticated") {
-      return null;
+    return null;
   }
 
-
-  // Renderiza o formulário se não autenticado e não carregando
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -167,9 +161,9 @@ export default function LoginForm() {
           />
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
-               <span className="flex items-center justify-center">
-                 <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Entrando...
-               </span>
+              <span className="flex items-center justify-center">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Entrando...
+              </span>
             ) : (
               "Entrar"
             )}

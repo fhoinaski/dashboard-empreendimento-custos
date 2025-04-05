@@ -20,38 +20,47 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isAuthenticated = !!token;
 
+  // Log Geral
   console.log(`[Middleware] Path: ${pathname}, IsAuth: ${isAuthenticated}, Token ID: ${token?.id ?? 'N/A'}, Token Role: ${token?.role ?? 'N/A'}`);
 
-  // Rotas protegidas e públicas
   const protectedRoutes = ['/dashboard', '/api/dashboard', '/api/despesas', '/api/documents', '/api/drive', '/api/empreendimentos', '/api/notifications', '/api/sheets', '/api/upload-s3'];
   const publicRoutes = ['/login', '/api/auth/providers', '/api/auth/csrf', '/api/auth/callback', '/api/auth/signout', '/api/auth/error', '/api/create-admin', '/api/test'];
+
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
-  const isApiAuthRoute = pathname.startsWith('/api/auth');
+  const isApiAuthRoute = pathname.startsWith('/api/auth'); // Rota de API de autenticação
 
-  // Permitir rotas públicas e de autenticação
-  if (isApiAuthRoute || (publicRoutes.some(route => pathname.startsWith(route)) && pathname !== '/login') || pathname === '/') {
-    console.log(`[Middleware] Permitindo rota pública/API de autenticação: ${pathname}`);
-    return NextResponse.next();
+  // 1. Permite acesso direto às rotas de API de autenticação
+  if (isApiAuthRoute) {
+      console.log(`[Middleware] Permitindo rota pública/API de autenticação: ${pathname}`);
+      return NextResponse.next();
   }
 
-  // Redirecionar usuários autenticados para o dashboard se tentarem acessar o login
+  // 2. Se está em rota pública (NÃO /login) OU raiz '/', permite acesso
+  if ( (publicRoutes.some(route => pathname.startsWith(route)) && pathname !== '/login') || pathname === '/') {
+      console.log(`[Middleware] Permitindo rota pública: ${pathname}`);
+      return NextResponse.next();
+  }
+
+  // 3. Se está no /login E JÁ autenticado -> Redireciona para /dashboard
   if (pathname === '/login' && isAuthenticated) {
-    console.log(`[Middleware] Redirecionando usuário autenticado DE /login PARA /dashboard`);
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+      console.log(`[Middleware] Redirecionando usuário autenticado DE /login PARA /dashboard`);
+      return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  // Redirecionar usuários não autenticados para o login se tentarem acessar rotas protegidas
+  // 4. Se tenta acessar rota PROTEGIDA e NÃO está autenticado -> Redireciona para /login
   if (isProtectedRoute && !isAuthenticated) {
-    console.log(`[Middleware] Redirecionando usuário não autenticado DE ${pathname} PARA /login`);
-    const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('callbackUrl', request.url);
-    return NextResponse.redirect(loginUrl);
+      console.log(`[Middleware] Redirecionando usuário não autenticado DE ${pathname} PARA /login`);
+      const loginUrl = new URL('/login', request.url);
+      loginUrl.searchParams.set('callbackUrl', request.url); // Manter callbackUrl
+      return NextResponse.redirect(loginUrl);
   }
 
-  console.log(`[Middleware] Allowing request for ${pathname}`);
+  // 5. Se chegou até aqui, permite o acesso (ex: rota protegida e autenticado)
+  console.log(`[Middleware] Permitindo request para ${pathname}`);
   return NextResponse.next();
 }
 
+// Configuração do Matcher (sem alterações)
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 };
