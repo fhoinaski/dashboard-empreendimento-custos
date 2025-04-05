@@ -325,40 +325,42 @@ export async function POST(request: Request) {
 
         await connectToDatabase();
         const empreendimentoDoc = await Empreendimento.findById(empreendimentoId).select('name folderId sheetId').lean<{ _id: Types.ObjectId; name: string; folderId?: string; sheetId?: string }>();
-        // --- FIX: Check if empreendimentoDoc is null ---
         if (!empreendimentoDoc) {
             console.error(`[API POST /despesas] Empreendimento not found: ${empreendimentoIdStr}`);
             return NextResponse.json({ error: 'Empreendimento não encontrado.' }, { status: 404 });
         }
-        // --- End Fix ---
         console.log(`[API POST /despesas] Empreendimento Found: ${empreendimentoDoc.name}`);
 
         // Prepare Data for DB
         const despesaDataToSave: NewDespesaInputData = {
             description,
             value,
-            date: date!, // <<< FIX: Use non-null assertion here (safe after validation)
-            dueDate: dueDate!, // <<< FIX: Use non-null assertion here (safe after validation)
+            date: date!,
+            dueDate: dueDate!,
             empreendimento: empreendimentoId,
             category,
-            status: finalFinancialStatus,
+            status: finalFinancialStatus, // Mantém o status financeiro enviado pelo formulário
             paymentMethod: paymentMethod || undefined,
             notes: notes || undefined,
             attachments: [],
             createdBy: userId,
-            approvalStatus: userRole === 'admin' ? 'Aprovado' : 'Pendente', // Aprovação automática para admins
-            reviewedBy: userRole === 'admin' ? userId : undefined, // Admin é o revisor se aprovar automaticamente
-            reviewedAt: userRole === 'admin' ? new Date() : undefined, // Data de revisão se aprovada
+            approvalStatus: userRole === 'admin' ? 'Aprovado' : 'Pendente',
+            reviewedBy: userRole === 'admin' ? userId : undefined,
+            reviewedAt: userRole === 'admin' ? new Date() : undefined,
             createdAt: new Date(),
             updatedAt: new Date(),
         };
 
-        // Ajustar o status financeiro com base na aprovação
+        // Ajustar o status financeiro apenas para administradores
         if (userRole === 'admin') {
             // Se for admin e a despesa for aprovada automaticamente, ajusta o status
             if (despesaDataToSave.status !== 'Pago') {
                 despesaDataToSave.status = 'A vencer';
+                console.log(`[API POST /despesas] Admin user: Adjusting financial status to 'A vencer' since it was not 'Pago'.`);
             }
+        } else {
+            // Para usuários e gerentes, o status financeiro já é finalFinancialStatus
+            console.log(`[API POST /despesas] Non-admin user: Keeping financial status as submitted: ${finalFinancialStatus}`);
         }
 
         // --- FIX: Use safe access for folderId ---
@@ -366,7 +368,6 @@ export async function POST(request: Request) {
             console.log("[API POST /despesas] Uploading attachment to Drive...");
             try {
                 const buffer = Buffer.from(await file.arrayBuffer());
-                // --- FIX: Access folderId safely ---
                 const uploadResult = await uploadFileToDrive({ buffer, originalname: file.name, mimetype: file.type }, empreendimentoDoc.folderId!, 'Despesas');
                 if (uploadResult.success && uploadResult.fileId && uploadResult.fileName && uploadResult.webViewLink) {
                     despesaDataToSave.attachments.push({ fileId: uploadResult.fileId, name: uploadResult.fileName, url: uploadResult.webViewLink });
@@ -376,7 +377,7 @@ export async function POST(request: Request) {
         } else if (file) { console.warn(`[API POST /despesas] File provided but empreendimento ${empreendimentoIdStr} lacks a folderId.`); }
         // --- End Fix ---
 
-        // Create Despesa... (as before)
+        // Create Despesa
         console.log("[API POST /despesas] Final data for DB creation:", JSON.stringify(despesaDataToSave, null, 2));
         const newDespesaDoc = await Despesa.create(despesaDataToSave);
         const newDespesa: DespesaDocument & { _id: Types.ObjectId } = newDespesaDoc as any;
@@ -386,7 +387,6 @@ export async function POST(request: Request) {
         }
 
         // --- Google Sheet Integration ---
-        // Adiciona ao Google Sheet apenas se a despesa for aprovada (admins criam como aprovada)
         const sheetId = empreendimentoDoc.sheetId;
         if (newDespesa.approvalStatus === 'Aprovado' && sheetId) {
             console.log(`[API POST /despesas] Approval status is Aprovado & sheetId found. Adding to Google Sheet...`);
@@ -421,7 +421,6 @@ export async function POST(request: Request) {
         const creator = await User.findById(userId).select('name').lean();
         const reviewer = userRole === 'admin' ? creator : null;
         
-        // Corrigido: Verificar se creator e reviewer têm a estrutura esperada
         const createdDespesaObject: ClientDespesa = {
             _id: newDespesa._id.toString(),
             description: newDespesa.description, 
