@@ -224,7 +224,7 @@ export default function DespesaDetail({ id }: { id: string }) {
                      <div className="flex items-center gap-2">
                         {despesa.approvalStatus === 'Aprovado' && <ThumbsUp className="h-4 w-4"/>}
                         {despesa.approvalStatus === 'Rejeitado' && <ThumbsDown className="h-4 w-4"/>}
-                        <span className="font-semibold">Despesa {despesa.approvalStatus.toLowerCase()}</span>
+                        <span className="font-semibold">Despesa {despesa.approvalStatus ? despesa.approvalStatus.toLowerCase() : 'pendente'}</span>
                      </div>
                      {despesa.reviewedBy && despesa.reviewedAt && (
                          <span className="text-muted-foreground text-xs">por {despesa.reviewedBy.name} em {format(new Date(despesa.reviewedAt), "dd/MM/yy 'às' HH:mm", { locale: ptBR })}</span>
