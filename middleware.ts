@@ -60,7 +60,7 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
-// Configuração do Matcher (sem alterações)
+// Configuração do Matcher (atualizado para permitir arquivos PWA)
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.json|sw.js|workbox-*.js|icons/.*|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)'],
 };
