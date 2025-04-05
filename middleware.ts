@@ -9,6 +9,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login?error=config', request.url));
   }
 
+  // Obter token da requisição
   let token = null;
   try {
       token = await getToken({ req: request, secret });
@@ -23,20 +24,24 @@ export async function middleware(request: NextRequest) {
   // Log Geral
   console.log(`[Middleware] Path: ${pathname}, IsAuth: ${isAuthenticated}, Token ID: ${token?.id ?? 'N/A'}, Token Role: ${token?.role ?? 'N/A'}`);
 
+  // Definir rotas protegidas e públicas
   const protectedRoutes = ['/dashboard', '/api/dashboard', '/api/despesas', '/api/documents', '/api/drive', '/api/empreendimentos', '/api/notifications', '/api/sheets', '/api/upload-s3'];
   const publicRoutes = ['/login', '/api/auth/providers', '/api/auth/csrf', '/api/auth/callback', '/api/auth/signout', '/api/auth/error', '/api/create-admin', '/api/test'];
 
+  // Verificar se é uma rota de API de autenticação
+  const isApiAuthRoute = pathname.startsWith('/api/auth');
+  
+  // Verificar se é uma rota protegida
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
-  const isApiAuthRoute = pathname.startsWith('/api/auth'); // Rota de API de autenticação
 
-  // 1. Permite acesso direto às rotas de API de autenticação
-  if (isApiAuthRoute) {
-      console.log(`[Middleware] Permitindo rota pública/API de autenticação: ${pathname}`);
+  // 1. Permitir TODAS as rotas relacionadas à autenticação sem restrições
+  if (isApiAuthRoute || pathname === '/api/auth') {
+      console.log(`[Middleware] Permitindo rota de autenticação: ${pathname}`);
       return NextResponse.next();
   }
 
-  // 2. Se está em rota pública (NÃO /login) OU raiz '/', permite acesso
-  if ( (publicRoutes.some(route => pathname.startsWith(route)) && pathname !== '/login') || pathname === '/') {
+  // 2. Se está em rota pública (exceto /login) OU raiz '/', permite acesso
+  if ((publicRoutes.some(route => pathname.startsWith(route)) && pathname !== '/login') || pathname === '/') {
       console.log(`[Middleware] Permitindo rota pública: ${pathname}`);
       return NextResponse.next();
   }
@@ -50,8 +55,9 @@ export async function middleware(request: NextRequest) {
   // 4. Se tenta acessar rota PROTEGIDA e NÃO está autenticado -> Redireciona para /login
   if (isProtectedRoute && !isAuthenticated) {
       console.log(`[Middleware] Redirecionando usuário não autenticado DE ${pathname} PARA /login`);
+      // Usar apenas o pathname como callback para evitar problemas com URLs completas
       const loginUrl = new URL('/login', request.url);
-      loginUrl.searchParams.set('callbackUrl', request.url); // Manter callbackUrl
+      // Não definir callbackUrl para evitar problemas de redirecionamento
       return NextResponse.redirect(loginUrl);
   }
 
