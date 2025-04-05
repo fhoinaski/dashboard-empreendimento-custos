@@ -23,15 +23,13 @@ export default function LoginForm() {
   const [loginError, setLoginError] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
-  const { status } = useSession();
+  const { data: session, status } = useSession();
 
-  // Redireciona se já autenticado
+  // Evita loop de redirecionamento
   useEffect(() => {
     if (status === "authenticated") {
-      console.log("[LoginForm] Usuário já autenticado, redirecionando para /dashboard");
+      console.log("[LoginForm] Usuário autenticado, redirecionando para dashboard");
       router.replace("/dashboard");
-      // Garante que o estado de carregamento seja resetado quando o status muda para authenticated
-      setIsLoading(false);
     }
   }, [status, router]);
 
@@ -44,55 +42,45 @@ export default function LoginForm() {
   });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    setIsLoading(true);
-    setLoginError(false);
-    console.log("[LoginForm] Iniciando tentativa de login para:", values.email);
-
     try {
+      setIsLoading(true);
+      setLoginError(false);
+
       const result = await signIn("credentials", {
         redirect: false,
         email: values.email,
         password: values.password,
-        callbackUrl: "/dashboard", // Define a URL de retorno
       });
 
-      console.log("[LoginForm] Resultado do signIn:", result);
-
-      if (result?.ok && !result.error) {
+      if (result?.ok) {
         toast({
           title: "Login bem-sucedido",
           description: "Redirecionando para o dashboard...",
         });
-        console.log("[LoginForm] Login OK, redirecionando para /dashboard...");
-        // Força a atualização da sessão no cliente
+        
+        // No Next.js 15, é melhor usar router.push e evitar router.refresh()
         router.push("/dashboard");
-        router.refresh(); // Garante que o estado da sessão seja atualizado
-        // Importante: resetar o estado de carregamento após login bem-sucedido
-        setIsLoading(false);
-        // Importante: resetar o estado de carregamento após login bem-sucedido
-        setIsLoading(false);
       } else {
-        const errorMessage = result?.error || "Email ou senha incorretos";
-        console.error("[LoginForm] Erro na autenticação:", errorMessage);
         setLoginError(true);
         toast({
           variant: "destructive",
           title: "Erro de autenticação",
-          description: errorMessage,
+          description: result?.error || "Credenciais inválidas",
         });
-        setIsLoading(false);
       }
     } catch (error) {
-      console.error("[LoginForm] Erro inesperado durante o signIn:", error);
+      console.error("[LoginForm] Erro:", error);
       toast({
         variant: "destructive",
         title: "Erro de conexão",
-        description: "Não foi possível conectar ao servidor. Tente novamente.",
+        description: "Não foi possível conectar ao servidor",
       });
+    } finally {
       setIsLoading(false);
     }
   }
 
+  // Renderização condicional com tratamento específico para Next.js 15
   if (status === "loading") {
     return (
       <div className="w-full max-w-md p-8 bg-background rounded-xl shadow-lg flex flex-col items-center justify-center min-h-[300px]">
