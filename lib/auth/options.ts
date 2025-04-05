@@ -1,8 +1,6 @@
 /* ================================== */
 /*         lib/auth/options.ts        */
 /* ================================== */
-// Ensure assignedEmpreendimentos (as string[]) is included in JWT and Session
-// (The provided code already seems correct, but verify population works reliably)
 
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
@@ -18,7 +16,7 @@ declare module "next-auth" {
     role?: string;
     sessionId?: string;
     avatarUrl?: string;
-    assignedEmpreendimentos?: string[]; // Array of string IDs
+    assignedEmpreendimentos?: string[];
   }
   interface Session {
     user: {
@@ -26,10 +24,10 @@ declare module "next-auth" {
       role?: string;
       name?: string | null;
       email?: string | null;
-      image?: string | null; // next-auth default
+      image?: string | null;
       sessionId?: string;
-      avatarUrl?: string; // custom
-      assignedEmpreendimentos?: string[]; // custom
+      avatarUrl?: string;
+      assignedEmpreendimentos?: string[];
     }
   }
   interface JWT {
@@ -38,7 +36,7 @@ declare module "next-auth" {
     sessionId?: string;
     avatarUrl?: string;
     name?: string;
-    assignedEmpreendimentos?: string[]; // Array of string IDs
+    assignedEmpreendimentos?: string[];
   }
 }
 // --- End Module Augmentation ---
@@ -57,54 +55,48 @@ export const authOptions: NextAuthOptions = {
         email: { label: "Email", type: "email" },
         password: { label: "Senha", type: "password" },
       },
-      async authorize(credentials: Record<"email" | "password", string> | undefined, req: Pick<RequestInternal, "body" | "query" | "headers" | "method">) {
-        if (!credentials || !credentials.email || !credentials.password) {
-          console.log("[Authorize] Missing credentials.");
+      async authorize(credentials: Record<"email" | "password", string> | undefined) {
+        if (!credentials?.email || !credentials?.password) {
+          if (!isProduction) console.log("[Authorize] Missing credentials.");
           return null;
         }
+
         try {
           await connectToDatabase();
-          console.log("[Authorize] Connected to DB. Finding user:", credentials.email);
+          if (!isProduction) console.log("[Authorize] Connected to DB. Finding user:", credentials.email);
 
-          // Fetch user WITHOUT population first
-          const user: UserDocument | null = await User.findOne({ email: credentials.email }).lean(); // Use lean for plain object
+          const user: UserDocument | null = await User.findOne({ email: credentials.email }).lean();
 
           if (!user) {
-            console.log("[Authorize] User not found:", credentials.email);
+            if (!isProduction) console.log("[Authorize] User not found:", credentials.email);
             return null;
           }
-          console.log("[Authorize] User found:", user.email, "Role:", user.role);
 
           if (!user.password) {
-            console.warn("[Authorize] User found but has no password:", user.email);
+            if (!isProduction) console.warn("[Authorize] User has no password:", user.email);
             return null;
           }
 
           const passwordIsValid = await compare(credentials.password, user.password);
-
           if (!passwordIsValid) {
-            console.log("[Authorize] Invalid password for user:", credentials.email);
+            if (!isProduction) console.log("[Authorize] Invalid password for user:", credentials.email);
             return null;
           }
 
-          console.log("[Authorize] Authentication successful for:", user.email);
-
-          // Convert ObjectId[] to string[] for assignedEmpreendimentos
           const assignedEmpreendimentosIds: string[] = (user.assignedEmpreendimentos || [])
-              .filter(id => id instanceof Types.ObjectId) // Ensure it's an ObjectId before converting
-              .map(id => id.toString());
+            .filter(id => id instanceof Types.ObjectId)
+            .map(id => id.toString());
 
-           console.log("[Authorize] Assigned Empreendimento IDs for token:", assignedEmpreendimentosIds);
+          if (!isProduction) console.log("[Authorize] Authentication successful for:", user.email, "Assigned IDs:", assignedEmpreendimentosIds);
 
-          // Return object for NextAuth token/session
           return {
             id: user._id.toString(),
             email: user.email,
             name: user.name,
-            role: user.role, // Make sure role exists on the user document
+            role: user.role,
             sessionId: generateSessionId(),
             avatarUrl: user.avatarUrl,
-            assignedEmpreendimentos: assignedEmpreendimentosIds, // Crucial for RBAC
+            assignedEmpreendimentos: assignedEmpreendimentosIds,
           };
         } catch (error) {
           console.error("[Authorize] Error during authentication:", error);
@@ -119,50 +111,55 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: "/login",
-    error: "/login", // Redirect to login on error
+    error: "/login",
   },
   callbacks: {
     async jwt({ token, user, trigger, session }) {
-      // Initial sign in
       if (user) {
         token.id = user.id;
         token.role = user.role;
         token.sessionId = user.sessionId;
         token.avatarUrl = user.avatarUrl;
         token.name = user.name;
-        token.assignedEmpreendimentos = user.assignedEmpreendimentos; // Store string[]
-        console.log("[JWT Callback - Initial] Token created:", { 
-          id: token.id, 
-          role: token.role, 
-          name: token.name, 
-          assignments: Array.isArray(token.assignedEmpreendimentos) ? token.assignedEmpreendimentos.length : 0 
+        token.assignedEmpreendimentos = user.assignedEmpreendimentos;
+        if (!isProduction) console.log("[JWT Callback - Initial] Token created:", {
+          id: token.id,
+          role: token.role,
+          name: token.name,
+          assignments: token.assignedEmpreendimentos?.length || 0,
         });
       }
 
-       // Session update (e.g., profile edit)
-       if (trigger === "update" && session) {
-          console.log("[JWT Callback - Update] Updating token from session:", session);
-          if (session.name) token.name = session.name;
-          if (session.avatarUrl) token.avatarUrl = session.avatarUrl;
-          // Role and assignments generally shouldn't be updated via client-side session update
-       }
+      if (trigger === "update" && session) {
+        if (!isProduction) console.log("[JWT Callback - Update] Updating token from session:", session);
+        if (session.name) token.name = session.name;
+        if (session.avatarUrl) token.avatarUrl = session.avatarUrl;
+      }
 
       return token;
     },
     async session({ session, token }) {
-      // Pass data from JWT token to session object (available client-side)
       if (token && session.user) {
-        session.user.id = token.id as string;
-        session.user.role = token.role as string;
-        session.user.sessionId = token.sessionId as string | undefined;
-        session.user.avatarUrl = token.avatarUrl as string | undefined;
-        session.user.name = token.name as string | undefined;
-        session.user.image = token.avatarUrl as string | undefined; // Map avatarUrl to default image field if needed
-        session.user.assignedEmpreendimentos = token.assignedEmpreendimentos as string[] | undefined; // Pass string[]
+        session.user.id = token.id;
+        session.user.role = token.role;
+        session.user.sessionId = token.sessionId;
+        session.user.avatarUrl = token.avatarUrl;
+        session.user.name = token.name;
+        session.user.image = token.avatarUrl; // Map to default image field
+        session.user.assignedEmpreendimentos = token.assignedEmpreendimentos;
+
+        if (!isProduction) console.log("[Session Callback] Session updated:", {
+          id: session.user.id,
+          role: session.user.role,
+          name: session.user.name,
+          assignments: session.user.assignedEmpreendimentos?.length || 0,
+        });
       } else {
-          console.warn("[Session Callback] Token or session.user missing during session creation.");
+        console.warn("[Session Callback] Token or session.user missing. Session may be invalid.");
+        // Opcional: Invalidar sessão se essencial
+        // delete session.user;
       }
-       // console.log("[Session Callback] Final Session Object:", JSON.stringify(session)); // Debugging
+
       return session;
     },
   },
