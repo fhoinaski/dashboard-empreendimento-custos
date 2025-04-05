@@ -126,7 +126,7 @@ export const authOptions: NextAuthOptions = {
           id: token.id,
           role: token.role,
           name: token.name,
-          assignments: token.assignedEmpreendimentos?.length || 0,
+          assignments: Array.isArray(token.assignedEmpreendimentos) ? token.assignedEmpreendimentos.length : 0,
         });
       }
 
@@ -140,13 +140,13 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (token && session.user) {
-        session.user.id = token.id;
-        session.user.role = token.role;
-        session.user.sessionId = token.sessionId;
-        session.user.avatarUrl = token.avatarUrl;
-        session.user.name = token.name;
-        session.user.image = token.avatarUrl; // Map to default image field
-        session.user.assignedEmpreendimentos = token.assignedEmpreendimentos;
+        session.user.id = token.id as string | undefined;
+        session.user.role = token.role as string | undefined;
+        session.user.sessionId = token.sessionId as string | undefined;;
+        session.user.avatarUrl = token.avatarUrl as string | undefined;;
+        session.user.name = token.name as string | undefined;;
+        session.user.image = token.avatarUrl as string | undefined;; // Map to default image field
+        session.user.assignedEmpreendimentos = token.assignedEmpreendimentos as string[] | undefined;
 
         if (!isProduction) console.log("[Session Callback] Session updated:", {
           id: session.user.id,

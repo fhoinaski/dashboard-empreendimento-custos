@@ -1,26 +1,16 @@
-// app/login/page.tsx
-import { useSession } from 'next-auth/react';
-import { redirect } from 'next/navigation';
-import LoginForm from '@/components/login-form';
-import { useEffect } from 'react';
+import type { Metadata } from "next"
+import LoginForm from "@/components/login-form"
+
+export const metadata: Metadata = {
+  title: "Login | Scotta Empreendimentos Dashboard",
+  description: "Login to access your Scotta Empreendimentos dashboard",
+}
 
 export default function LoginPage() {
-  const { data: session, status } = useSession();
-
-  useEffect(() => {
-    if (status === 'authenticated') {
-      console.log('[LoginPage] Usuário autenticado, redirecionando para /dashboard');
-      redirect('/dashboard');
-    }
-  }, [status]);
-
-  if (status === 'loading') {
-    return <div>Carregando...</div>;
-  }
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background to-secondary/20">
       <LoginForm />
     </div>
-  );
+  )
 }
+
