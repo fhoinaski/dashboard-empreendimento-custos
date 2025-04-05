@@ -1,72 +1,90 @@
-// app/api/despesas/monthly/route.ts
+// FILE: app/api/despesas/monthly/route.ts (Refatorado)
 import { NextResponse } from "next/server";
-import mongoose, { PipelineStage, FilterQuery } from "mongoose"; // Importar tipos
+import mongoose, { PipelineStage, FilterQuery, Types } from "mongoose";
 import connectToDatabase from "@/lib/db/mongodb";
 import { Despesa } from "@/lib/db/models";
+import { getServerSession } from "next-auth/next"; // Importar
+import { authOptions } from "@/lib/auth/options"; // Importar
 
 export async function GET(request: Request) {
   try {
+    // --- Verificação de Sessão e RBAC ---
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id || !session.user.role) {
+        console.warn("[API GET /api/despesas/monthly] Acesso não autorizado.");
+        return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+    const userRole = session.user.role;
+    const userAssignedEmpreendimentos = (session.user.assignedEmpreendimentos || [])
+        .filter(id => mongoose.isValidObjectId(id))
+        .map(id => new Types.ObjectId(id));
+    // --- Fim Verificação ---
+
     await connectToDatabase();
     const { searchParams } = new URL(request.url);
     const from = new Date(searchParams.get("from") || new Date(new Date().getFullYear(), 0, 1));
     const to = new Date(searchParams.get("to") || new Date());
-    const empreendimentoId = searchParams.get("empreendimento"); // <-- NOVO: Ler ID
+    const empreendimentoIdParam = searchParams.get("empreendimento");
 
-    // Filtro base por data
-    const match: FilterQuery<any> = { // Tipagem mais genérica
+    // --- Filtro RBAC + Filtros da Requisição ---
+    const match: FilterQuery<any> = {
       date: { $gte: from, $lte: to },
+      approvalStatus: 'Aprovado' // Apenas despesas aprovadas
     };
 
-    // Adicionar filtro de empreendimento SE fornecido e válido
-    if (empreendimentoId && empreendimentoId !== "todos" && mongoose.isValidObjectId(empreendimentoId)) {
-        console.log(`API GET /api/despesas/monthly: Filtrando por Empreendimento ID: ${empreendimentoId}`);
-        match.empreendimento = new mongoose.Types.ObjectId(empreendimentoId);
-    } else if (empreendimentoId && empreendimentoId !== "todos") {
-        console.warn(`API GET /api/despesas/monthly: ID de empreendimento inválido: ${empreendimentoId}`);
-        // Opcional: retornar erro 400 ou ignorar filtro inválido
+    let targetEmpreendimentoId: Types.ObjectId | null = null;
+    if (empreendimentoIdParam && empreendimentoIdParam !== "todos") {
+        if (!mongoose.isValidObjectId(empreendimentoIdParam)) {
+            return NextResponse.json({ error: "ID de empreendimento inválido" }, { status: 400 });
+        }
+        targetEmpreendimentoId = new Types.ObjectId(empreendimentoIdParam);
     }
 
+    if (userRole === 'admin' || userRole === 'manager') {
+        if (targetEmpreendimentoId) {
+            match.empreendimento = targetEmpreendimentoId;
+        }
+    } else if (userRole === 'user') {
+        if (targetEmpreendimentoId) {
+            if (!userAssignedEmpreendimentos.some(id => id.equals(targetEmpreendimentoId!))) {
+                console.warn(`[API GET /api/despesas/monthly] Usuário ${session.user.id} tentou acessar empreendimento ${targetEmpreendimentoId} não atribuído.`);
+                return NextResponse.json({ error: 'Acesso negado a este empreendimento' }, { status: 403 });
+            }
+            match.empreendimento = targetEmpreendimentoId;
+        } else {
+            match.empreendimento = { $in: userAssignedEmpreendimentos };
+        }
+    } else {
+        return NextResponse.json({ error: 'Permissão inválida' }, { status: 403 });
+    }
+    // --- Fim Filtro RBAC ---
+
     const aggregationPipeline: PipelineStage[] = [
-      { $match: match }, // <-- Usa o filtro (com ou sem empreendimento)
+      { $match: match },
       {
         $group: {
-          _id: { month: { $month: "$date" }, year: { $year: "$date" } }, // Agrupar por ano e mês
+          _id: { month: { $month: "$date" }, year: { $year: "$date" } },
           total: { $sum: "$value" },
         },
       },
       {
         $project: {
-          _id: 0, // Remover _id composto
+          _id: 0,
           year: "$_id.year",
           month: "$_id.month",
-          name: { // Mapear mês para nome abreviado
-            $let: {
-               vars: { monthsInYear: ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"] },
-               in: { $arrayElemAt: [ "$$monthsInYear", { $subtract: ["$_id.month", 1] } ] }
-            }
-          },
+          name: { $let: { vars: { monthsInYear: ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"] }, in: { $arrayElemAt: [ "$$monthsInYear", { $subtract: ["$_id.month", 1] } ] } } },
           total: 1,
         },
       },
-      { $sort: { year: 1, month: 1 } }, // Ordenar por ano e depois por mês
+      { $sort: { year: 1, month: 1 } },
     ];
 
     const despesas = await Despesa.aggregate(aggregationPipeline);
 
-    // Garantir que todos os meses do período sejam retornados (Lógica precisa ser ajustada para range dinâmico)
-    // Esta lógica simples de allMonths não funciona bem com filtros de data.
-    // Uma abordagem melhor seria gerar os meses esperados com base no `from` e `to`
-    // e preencher os dados faltantes. Por simplicidade, vamos retornar o que a query der por enquanto.
-    // const allMonths = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-    // const result = allMonths.map((month) => {
-    //   const found = despesas.find((d) => d.name === month);
-    //   return found || { name: month, total: 0 };
-    // });
-
-    return NextResponse.json(despesas); // Retorna os dados agregados diretamente
+    return NextResponse.json(despesas);
 
   } catch (error) {
-    console.error("Erro ao buscar despesas mensais:", error);
+    console.error("[API GET /api/despesas/monthly] Erro:", error);
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
     return NextResponse.json({ error: "Erro ao buscar dados mensais", details: errorMessage }, { status: 500 });
   }

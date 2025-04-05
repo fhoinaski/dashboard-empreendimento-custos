@@ -1,28 +1,18 @@
+// FILE: app/api/empreendimentos/[id]/documents/route.ts (Refatorado com RBAC)
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import mongoose from 'mongoose';
-
+import mongoose, { Types } from 'mongoose'; // Importar Types
 import connectToDatabase from '@/lib/db/mongodb';
 import { Empreendimento, Documento } from '@/lib/db/models';
 import { authOptions } from '@/lib/auth/options';
 import { uploadFileToDrive, listFilesInFolder } from '@/lib/google/drive';
 
-// Definir tipos para os arquivos do Google Drive
-interface DriveFile {
-  id: string;
-  name: string;
-  mimeType: string;
-  webViewLink?: string;
-  webContentLink?: string;
-  createdTime?: string;
-  size?: string;
-}
-
-
-
+// --- Tipagem (sem alterações) ---
+interface DriveFile { id: string; name: string; mimeType: string; webViewLink?: string; webContentLink?: string; createdTime?: string; size?: string; }
 function convertDriveFiles(files: any[]): DriveFile[] {
+    // Função original para converter dados do Drive
     return files
-      .filter(file => file.id && file.mimeType !== 'application/vnd.google-apps.folder')
+      .filter(file => file?.id && file.mimeType !== 'application/vnd.google-apps.folder') // Adicionado safe access
       .map(file => ({
         id: file.id || '',
         name: file.name || 'Sem nome',
@@ -32,184 +22,179 @@ function convertDriveFiles(files: any[]): DriveFile[] {
         createdTime: file.createdTime ?? undefined,
         size: file.size ?? undefined
       }));
-  }
-  
+}
+// --- Fim Tipagem ---
 
-// GET - Listar documentos de um empreendimento
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// GET - Listar documentos de um empreendimento (RBAC Adicionado)
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  console.log(`[API GET /empreendimentos/.../documents] Requisição recebida.`);
   try {
-    // Verificar autenticação
+    const resolvedParams = await params;
+    const empreendimentoId = resolvedParams.id;
+
+    if (!mongoose.isValidObjectId(empreendimentoId)) {
+      console.log(`[API GET /.../documents] ID inválido: ${empreendimentoId}`);
+      return NextResponse.json({ error: 'ID de empreendimento inválido' }, { status: 400 });
+    }
+
+    // --- Verificação de Sessão e RBAC ---
     const session = await getServerSession(authOptions);
-    
-    if (!session) {
-      return NextResponse.json(
-        { error: 'Não autorizado' },
-        { status: 401 }
-      );
+    // Verifica sessão, ID e role
+    if (!session?.user?.id || !session.user.role) {
+      console.warn(`[API GET /.../documents] Tentativa de acesso não autorizada (sem sessão válida) para Empr. ID: ${empreendimentoId}`);
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
-    
-    const { id } = await params;
-    
-    // Validar ID
-    if (!mongoose.isValidObjectId(id)) {
-      return NextResponse.json(
-        { error: 'ID inválido' },
-        { status: 400 }
-      );
+    const userRole = session.user.role;
+    const userAssignedEmpreendimentos = session.user.assignedEmpreendimentos || [];
+    // Verifica se o usuário pode acessar este empreendimento específico
+    const canAccess = userRole === 'admin' || userRole === 'manager' || (userRole === 'user' && userAssignedEmpreendimentos.includes(empreendimentoId));
+
+    if (!canAccess) {
+        console.warn(`[API GET /.../documents] Usuário ${session.user.id} (${userRole}) sem permissão para Empr. ID: ${empreendimentoId}`);
+        return NextResponse.json({ error: 'Acesso negado a este empreendimento' }, { status: 403 });
     }
-    
+    console.log(`[API GET /.../documents] Acesso autorizado para ${userRole} ${session.user.id} ao Empr. ID: ${empreendimentoId}.`);
+    // --- Fim Verificação ---
+
     await connectToDatabase();
-    
-    // Verificar se o empreendimento existe
-    const empreendimento = await Empreendimento.findById(id);
-    
+    const empreendimento = await Empreendimento.findById(empreendimentoId).select('folderId'); // Apenas o folderId é necessário
     if (!empreendimento) {
-      return NextResponse.json(
-        { error: 'Empreendimento não encontrado' },
-        { status: 404 }
-      );
+      console.log(`[API GET /.../documents] Empreendimento ${empreendimentoId} não encontrado no DB.`);
+      return NextResponse.json({ error: 'Empreendimento não encontrado' }, { status: 404 });
     }
-    
-    // Buscar documentos pelo empreendimento
-    const documentos = await Documento.find({ empreendimento: id })
-      .sort({ createdAt: -1 });
-    
-    // Obter parâmetros de consulta
-    const { searchParams } = new URL(request.url);
-    const category = searchParams.get('category');
-    
-    // Se tiver uma categoria e o ID da pasta do Drive, buscar arquivos diretamente do Drive
-    if (category && empreendimento.folderId) {
-        const result = await listFilesInFolder(empreendimento.folderId);
-        
-        if (result.success && result.files) {
-          const files = convertDriveFiles(result.files);
-          
-          return NextResponse.json({
-            documentos,
-            driveFiles: files
-          });
+
+    // Buscar documentos do DB (já sabemos que o usuário tem permissão)
+    const documentos = await Documento.find({ empreendimento: empreendimentoId }).sort({ createdAt: -1 }).lean();
+    console.log(`[API GET /.../documents] Encontrados ${documentos.length} documentos no DB.`);
+
+    // Buscar arquivos do Drive (opcional)
+    let driveFiles: DriveFile[] = [];
+    if (empreendimento.folderId) {
+        // const { searchParams } = new URL(request.url); // Descomente se precisar do parâmetro 'category'
+        // const category = searchParams.get('category');
+        console.log(`[API GET /.../documents] Tentando listar arquivos do Drive para folderId: ${empreendimento.folderId}`);
+        try {
+            const result = await listFilesInFolder(empreendimento.folderId);
+            if (result.success && result.files) {
+                driveFiles = convertDriveFiles(result.files);
+                console.log(`[API GET /.../documents] Encontrados ${driveFiles.length} arquivos no Drive.`);
+                // Adicionar lógica de filtro por categoria aqui, se necessário
+            } else {
+                console.warn(`[API GET /.../documents] Não foi possível listar arquivos do Drive: ${result.error}`);
+            }
+        } catch (driveError) {
+             console.error(`[API GET /.../documents] Erro ao listar arquivos do Drive:`, driveError);
         }
-      }
-    
-    return NextResponse.json({ documentos });
+    } else {
+        console.log(`[API GET /.../documents] Empreendimento ${empreendimentoId} não possui folderId configurado.`);
+    }
+
+    return NextResponse.json({ documentos, driveFiles });
+
   } catch (error) {
-    console.error('Erro ao listar documentos:', error);
-    return NextResponse.json(
-      { error: 'Erro ao listar documentos' },
-      { status: 500 }
-    );
+    const empreendimentoIdError = params ? (await params).id : 'ID_DESCONHECIDO';
+    console.error(`[API GET /empreendimentos/${empreendimentoIdError}/documents] Erro interno:`, error);
+    return NextResponse.json({ error: 'Erro interno ao listar documentos' }, { status: 500 });
   }
 }
 
-// POST - Adicionar um documento ao empreendimento
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// POST - Adicionar um documento ao empreendimento (RBAC Adicionado)
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
+   console.log(`[API POST /empreendimentos/.../documents] Requisição recebida.`);
   try {
-    // Verificar autenticação
+    const resolvedParams = await params;
+    const empreendimentoId = resolvedParams.id;
+
+    if (!mongoose.isValidObjectId(empreendimentoId)) {
+      console.log(`[API POST /.../documents] ID inválido: ${empreendimentoId}`);
+      return NextResponse.json({ error: 'ID de empreendimento inválido' }, { status: 400 });
+    }
+
+    // --- Verificação de Sessão e RBAC ---
     const session = await getServerSession(authOptions);
-    
-    if (!session || !session.user?.email) {
-      return NextResponse.json(
-        { error: 'Não autorizado' },
-        { status: 401 }
-      );
+    // Verifica sessão, ID, role e email
+    if (!session?.user?.id || !session.user.role || !session.user.email) {
+        console.warn(`[API POST /.../documents] Tentativa de acesso não autorizada (sem sessão válida) para Empr. ID: ${empreendimentoId}`);
+        return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
     }
-    
-    const { id } = await params;
-    
-    // Validar ID
-    if (!mongoose.isValidObjectId(id)) {
-      return NextResponse.json(
-        { error: 'ID inválido' },
-        { status: 400 }
-      );
+    const userRole = session.user.role;
+    const userAssignedEmpreendimentos = session.user.assignedEmpreendimentos || [];
+    // Verifica se pode adicionar documento a ESTE empreendimento
+    const canAccess = userRole === 'admin' || userRole === 'manager' || (userRole === 'user' && userAssignedEmpreendimentos.includes(empreendimentoId));
+
+    if (!canAccess) {
+        console.warn(`[API POST /.../documents] Usuário ${session.user.id} (${userRole}) sem permissão para Empr. ID: ${empreendimentoId}`);
+        return NextResponse.json({ error: 'Acesso negado para adicionar documento neste empreendimento' }, { status: 403 });
     }
-    
-    // Para upload de arquivos, precisamos usar formData
+    console.log(`[API POST /.../documents] Acesso autorizado para ${userRole} ${session.user.id} ao Empr. ID: ${empreendimentoId}.`);
+    // --- Fim Verificação ---
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
-    const name = formData.get('name') as string | null;
-    const type = formData.get('type') as string | null;
+    const name = formData.get('name') as string | null; // Nome pode ser opcional (usar nome do arquivo)
+    // const type = formData.get('type') as string | null; // Tipo pode ser inferido do arquivo
     const category = formData.get('category') as string | null;
-    
-    if (!file || !name || !type) {
-      return NextResponse.json(
-        { error: 'Arquivo, nome e tipo são obrigatórios' },
-        { status: 400 }
-      );
+
+    if (!file) {
+      console.log("[API POST /.../documents] Arquivo não fornecido.");
+      return NextResponse.json({ error: 'Arquivo é obrigatório' }, { status: 400 });
     }
-    
+
+    // Validações de arquivo (tamanho, tipo) podem ser adicionadas aqui
+
+    const finalName = name || file.name;
+    const finalCategory = category || 'Outros'; // Categoria padrão
+
     await connectToDatabase();
-    
-    // Verificar se o empreendimento existe
-    const empreendimento = await Empreendimento.findById(id);
-    
+    const empreendimento = await Empreendimento.findById(empreendimentoId).select('folderId name'); // Buscar nome também
     if (!empreendimento) {
-      return NextResponse.json(
-        { error: 'Empreendimento não encontrado' },
-        { status: 404 }
-      );
+      console.log(`[API POST /.../documents] Empreendimento ${empreendimentoId} não encontrado no DB.`);
+      return NextResponse.json({ error: 'Empreendimento não encontrado' }, { status: 404 });
     }
-    
-    // Verificar se o empreendimento tem uma pasta no Drive
     if (!empreendimento.folderId) {
-      return NextResponse.json(
-        { error: 'Empreendimento não possui pasta no Google Drive' },
-        { status: 400 }
-      );
+      console.warn(`[API POST /.../documents] Empreendimento ${empreendimentoId} não possui folderId configurado.`);
+      return NextResponse.json({ error: 'Configuração do Google Drive pendente para este empreendimento' }, { status: 400 });
     }
-    
-    // Converter o arquivo para buffer
+
+    console.log(`[API POST /.../documents] Fazendo upload para folderId: ${empreendimento.folderId}, Categoria: ${finalCategory}`);
     const buffer = Buffer.from(await file.arrayBuffer());
-    
-    // Upload do arquivo para o Google Drive
     const uploadResult = await uploadFileToDrive(
-      {
-        buffer,
-        originalname: file.name,
-        mimetype: file.type
-      },
+      { buffer, originalname: file.name, mimetype: file.type },
       empreendimento.folderId,
-      category || 'Outros'
+      finalCategory
     );
-    
+
     if (!uploadResult.success || !uploadResult.fileId || !uploadResult.webViewLink) {
-      return NextResponse.json(
-        { error: 'Erro ao fazer upload do arquivo para o Google Drive' },
-        { status: 500 }
-      );
+      console.error(`[API POST /.../documents] Erro no upload para o Drive: ${uploadResult.error}`);
+      return NextResponse.json({ error: uploadResult.error || 'Erro ao fazer upload para o Google Drive' }, { status: 500 });
     }
-    
+    console.log(`[API POST /.../documents] Upload para o Drive bem-sucedido. File ID: ${uploadResult.fileId}`);
+
     // Salvar referência do documento no MongoDB
     const documento = await Documento.create({
-      name,
-      type,
-      empreendimento: id,
-      category: category || 'Outros',
+      name: finalName,
+      type: file.type, // Usar o mimetype real do arquivo
+      empreendimento: empreendimentoId,
+      category: finalCategory,
       fileId: uploadResult.fileId,
-      url: uploadResult.webViewLink,
-      createdBy: session.user.email,
+      url: uploadResult.webViewLink, // Usar o link de visualização
+      createdBy: new Types.ObjectId(session.user.id), // **IMPORTANTE: Usar ObjectId do usuário**
     });
-    
+    console.log(`[API POST /.../documents] Documento salvo no DB com ID: ${documento._id}`);
+
+    // Retornar o documento criado e informações do arquivo
     return NextResponse.json({
-      documento,
+      documento: documento.toObject(), // Converte Mongoose doc para objeto JS
       file: {
         id: uploadResult.fileId,
         name: uploadResult.fileName,
         url: uploadResult.webViewLink,
       }
-    }, { status: 201 });
+    }, { status: 201 }); // Status 201 Created
+
   } catch (error) {
-    console.error('Erro ao adicionar documento:', error);
-    return NextResponse.json(
-      { error: 'Erro ao adicionar documento' },
-      { status: 500 }
-    );
+    const empreendimentoIdError = params ? (await params).id : 'ID_DESCONHECIDO';
+    console.error(`[API POST /empreendimentos/${empreendimentoIdError}/documents] Erro interno:`, error);
+    return NextResponse.json({ error: 'Erro interno ao adicionar documento' }, { status: 500 });
   }
 }

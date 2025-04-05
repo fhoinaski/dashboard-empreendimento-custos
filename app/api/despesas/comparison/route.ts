@@ -1,46 +1,46 @@
-import { NextResponse } from "next/server";
-import connectToDatabase from "@/lib/db/mongodb";
-import { Despesa, Empreendimento } from "@/lib/db/models";
+// FILE: app/api/documents/route.ts (Refatorado)
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
+import mongoose, { Types } from 'mongoose'; // Importar Types
+import connectToDatabase from '@/lib/db/mongodb';
+import { Documento } from '@/lib/db/models';
+import { authOptions } from '@/lib/auth/options';
 
 export async function GET(request: Request) {
   try {
-    await connectToDatabase();
-    const { searchParams } = new URL(request.url);
-    const from = new Date(searchParams.get("from") || new Date(new Date().getFullYear(), 0, 1));
-    const to = new Date(searchParams.get("to") || new Date());
-    const empreendimento = searchParams.get("empreendimento");
+    // --- Verificação de Sessão e RBAC ---
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id || !session.user.role) {
+        console.warn("[API GET /api/documents] Acesso não autorizado.");
+        return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+    }
+    const userRole = session.user.role;
+    const userAssignedEmpreendimentos = session.user.assignedEmpreendimentos || [];
+    // --- Fim Verificação ---
 
-       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const match: any = {
-      date: { $gte: from, $lte: to },
-    };
-    if (empreendimento && empreendimento !== "todos") {
-      match.empreendimento = empreendimento;
+    const { searchParams } = new URL(request.url);
+    const empreendimentoId = searchParams.get('empreendimentoId');
+
+    if (!empreendimentoId || !mongoose.isValidObjectId(empreendimentoId)) {
+      return NextResponse.json({ error: 'ID de empreendimento inválido' }, { status: 400 });
     }
 
-    const despesas = await Despesa.aggregate([
-      { $match: match },
-      {
-        $group: {
-          _id: "$empreendimento",
-          total: { $sum: "$value" },
-        },
-      },
-    ]);
+    // --- Verificação de Permissão para o Empreendimento Específico ---
+    const canAccess = userRole === 'admin' || userRole === 'manager' || (userRole === 'user' && userAssignedEmpreendimentos.includes(empreendimentoId));
 
-    const empreendimentos = await Empreendimento.find();
-    const comparisonData = empreendimentos.map((emp) => {
-      const despesa = despesas.find((d) => d._id === emp._id.toString()) || { total: 0 };
-      return {
-        name: emp.name,
-        planejado: emp.totalUnits * emp.soldUnits * 1000, // Exemplo de cálculo fictício
-        realizado: despesa.total,
-      };
-    });
+    if (!canAccess) {
+        console.warn(`[API GET /api/documents] Usuário ${session.user.id} (${userRole}) sem permissão para empreendimento ${empreendimentoId}`);
+        return NextResponse.json({ error: 'Acesso negado a este empreendimento' }, { status: 403 });
+    }
+    // --- Fim Verificação de Permissão ---
 
-    return NextResponse.json(comparisonData);
+    await connectToDatabase();
+    // A query agora é segura, pois o acesso ao empreendimento foi validado
+    const documents = await Documento.find({ empreendimento: empreendimentoId }).lean();
+
+    return NextResponse.json({ documents });
   } catch (error) {
-    console.error("Erro ao buscar comparativo:", error);
-    return NextResponse.json({ error: "Erro ao buscar dados" }, { status: 500 });
+    console.error('[API GET /api/documents] Erro:', error);
+    return NextResponse.json({ error: 'Erro ao buscar documentos' }, { status: 500 });
   }
 }
