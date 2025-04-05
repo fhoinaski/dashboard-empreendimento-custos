@@ -7,9 +7,16 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Building2, Loader2 } from "lucide-react";
-import { signIn, useSession } from "next-auth/react";
+import { signIn, useSession, getSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -25,13 +32,13 @@ export default function LoginForm() {
   const { toast } = useToast();
   const { data: session, status } = useSession();
 
-  // Evita loop de redirecionamento
+  // Evita loop de redirecionamento e verifica a sessão
   useEffect(() => {
     if (status === "authenticated") {
       console.log("[LoginForm] Usuário autenticado, redirecionando para dashboard");
-      router.replace("/dashboard");
+      window.location.href = "/dashboard"; // Força redirecionamento completo
     }
-  }, [status, router]);
+  }, [status]);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -42,45 +49,61 @@ export default function LoginForm() {
   });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    try {
-      setIsLoading(true);
-      setLoginError(false);
+    if (!values.email || !values.password) {
+      setLoginError(true);
+      toast({
+        variant: "destructive",
+        title: "Erro",
+        description: "Email e senha são obrigatórios",
+      });
+      return;
+    }
 
+    setIsLoading(true);
+    setLoginError(false);
+
+    try {
+      // Faz o login sem redirecionamento automático
       const result = await signIn("credentials", {
         redirect: false,
         email: values.email,
         password: values.password,
       });
 
-      if (result?.ok) {
+      console.log("[LoginForm] Resultado do signIn:", result);
+
+      if (!result?.ok) {
+        throw new Error(result?.error || "Credenciais inválidas");
+      }
+
+      // Verifica a sessão após o login
+      const session = await getSession();
+      console.log("[LoginForm] Sessão após login:", session);
+
+      if (session) {
         toast({
           title: "Login bem-sucedido",
           description: "Redirecionando para o dashboard...",
         });
-        
-        // No Next.js 15, é melhor usar router.push e evitar router.refresh()
-        router.push("/dashboard");
+        // Força redirecionamento completo para garantir que a sessão seja reconhecida
+        window.location.href = "/dashboard";
       } else {
-        setLoginError(true);
-        toast({
-          variant: "destructive",
-          title: "Erro de autenticação",
-          description: result?.error || "Credenciais inválidas",
-        });
+        throw new Error("Sessão não foi criada após login bem-sucedido");
       }
     } catch (error) {
-      console.error("[LoginForm] Erro:", error);
+      console.error("[LoginForm] Erro no login:", error);
+      setLoginError(true);
       toast({
         variant: "destructive",
-        title: "Erro de conexão",
-        description: "Não foi possível conectar ao servidor",
+        title: "Erro de autenticação",
+        description: error instanceof Error ? error.message : "Falha na autenticação",
       });
     } finally {
       setIsLoading(false);
     }
   }
 
-  // Renderização condicional com tratamento específico para Next.js 15
+  // Renderização condicional para status de carregamento
   if (status === "loading") {
     return (
       <div className="w-full max-w-md p-8 bg-background rounded-xl shadow-lg flex flex-col items-center justify-center min-h-[300px]">
@@ -90,6 +113,7 @@ export default function LoginForm() {
     );
   }
 
+  // Não renderiza nada se já autenticado (o useEffect cuida do redirecionamento)
   if (status === "authenticated") {
     return null;
   }
@@ -123,7 +147,12 @@ export default function LoginForm() {
               <FormItem>
                 <FormLabel>Email</FormLabel>
                 <FormControl>
-                  <Input placeholder="seu@email.com" {...field} className={loginError ? "border-destructive" : ""} />
+                  <Input
+                    placeholder="seu@email.com"
+                    {...field}
+                    disabled={isLoading}
+                    className={loginError ? "border-destructive" : ""}
+                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>
@@ -140,6 +169,7 @@ export default function LoginForm() {
                     type="password"
                     placeholder="••••••"
                     {...field}
+                    disabled={isLoading}
                     className={loginError ? "border-destructive" : ""}
                   />
                 </FormControl>

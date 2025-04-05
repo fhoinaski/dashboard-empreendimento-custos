@@ -9,6 +9,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/login?error=config', request.url));
   }
 
+  console.log('[Middleware] Full URL:', request.url);
+  console.log('[Middleware] Pathname:', request.nextUrl.pathname);
+
   // Obter token da requisição
   let token = null;
   try {
@@ -18,6 +21,7 @@ export async function middleware(request: NextRequest) {
         secureCookie: process.env.NODE_ENV === 'production' // Usar cookies seguros em produção
       });
       // Log detalhado para depuração
+      console.log('[Middleware] Token completo:', JSON.stringify(token, null, 2));
       console.log(`[Middleware] Token obtido:`, token ? 'Sim' : 'Não', 
                  `JWT Sub: ${token?.sub || 'N/A'}`, 
                  `Exp: ${token?.exp || 'N/A'}`);
@@ -27,13 +31,14 @@ export async function middleware(request: NextRequest) {
   }
 
   const { pathname } = request.nextUrl;
-  const isAuthenticated = !!token;
+  // Verificar tanto token.id quanto token.sub
+  const isAuthenticated = !!token && (!!token.sub || !!token.id);
 
   // Log Geral
-  console.log(`[Middleware] Path: ${pathname}, IsAuth: ${isAuthenticated}, Token ID: ${token?.id ?? 'N/A'}, Token Role: ${token?.role ?? 'N/A'}`);
+  console.log(`[Middleware] Path: ${pathname}, IsAuth: ${isAuthenticated}, Token ID: ${token?.id ?? token?.sub ?? 'N/A'}, Token Role: ${token?.role ?? 'N/A'}`);
 
-  // Definir rotas protegidas e públicas
-  const protectedRoutes = ['/dashboard', '/api/dashboard', '/api/despesas', '/api/documents', '/api/drive', '/api/empreendimentos', '/api/notifications', '/api/sheets', '/api/upload-s3'];
+  // Definir rotas protegidas e públicas - incluindo mais caminhos de dashboard
+  const protectedRoutes = ['/dashboard', '/dashboard/', '/dashboard/home', '/api/dashboard', '/api/despesas', '/api/documents', '/api/drive', '/api/empreendimentos', '/api/notifications', '/api/sheets', '/api/upload-s3'];
   const publicRoutes = ['/login', '/api/auth/providers', '/api/auth/csrf', '/api/auth/callback', '/api/auth/signout', '/api/auth/error', '/api/create-admin', '/api/test'];
 
   // Verificar se é uma rota de API de autenticação ou relacionada à sessão
@@ -56,7 +61,7 @@ export async function middleware(request: NextRequest) {
 
   // 3. Se está no /login E JÁ autenticado -> Redireciona para /dashboard
   if (pathname === '/login' && isAuthenticated) {
-      console.log(`[Middleware] Redirecionando usuário autenticado DE /login PARA /dashboard. Token ID: ${token?.id ?? 'N/A'}`);
+      console.log(`[Middleware] Redirecionando usuário autenticado DE /login PARA /dashboard. Token ID: ${token?.id ?? token?.sub ?? 'N/A'}`);
       const dashboardUrl = new URL('/dashboard', request.url);
       return NextResponse.redirect(dashboardUrl);
   }

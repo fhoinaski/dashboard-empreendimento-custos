@@ -17,6 +17,7 @@ declare module "next-auth" {
   interface Session {
     user: {
       id?: string;
+      sub?: string;
       role?: string;
       name?: string | null;
       email?: string | null;
@@ -28,6 +29,7 @@ declare module "next-auth" {
   }
   interface JWT {
     id?: string;
+    sub?: string;
     role?: string;
     sessionId?: string;
     avatarUrl?: string;
@@ -111,6 +113,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         console.log("[JWT Callback] Populando token com dados do objeto 'user':", {id: user.id, email: user.email, role: user.role});
         token.id = user.id;
+        token.sub = user.id; // Garante consistência entre sub e id
         token.role = user.role;
         token.name = user.name;
         token.email = user.email;
@@ -122,66 +125,66 @@ export const authOptions: NextAuthOptions = {
         if (session.name) token.name = session.name;
         if (session.avatarUrl) token.avatarUrl = session.avatarUrl;
       }
-      console.log("[JWT Callback] Retornando token:", { id: token.id, email: token.email, role: token.role });
+      console.log("[JWT Callback] Retornando token:", { id: token.id, sub: token.sub, email: token.email, role: token.role });
       return token;
     },
     async session({ session, token }) {
       console.log("[Session Callback] Iniciando...");
-      console.log("[Session Callback] Token recebido:", { id: token?.id, email: token?.email, role: token?.role });
+      console.log("[Session Callback] Token recebido:", { id: token?.id, sub: token?.sub, email: token?.email, role: token?.role });
       if (token && session.user) {
         session.user.id = token.id as string;
+        session.user.sub = token.sub as string;
         session.user.role = token.role as string;
         session.user.name = token.name as string | undefined;
         session.user.email = token.email as string | undefined;
         session.user.avatarUrl = token.avatarUrl as string | undefined;
         session.user.image = token.avatarUrl as string | undefined || session.user.image;
         session.user.assignedEmpreendimentos = token.assignedEmpreendimentos as string[] | undefined;
-        console.log("[Session Callback] Objeto session populado com dados do token.");
+        console.log("[Session Callback] Objeto session populado com dados do token:", {
+          userId: session.user.id,
+          userSub: session.user.sub,
+          userRole: session.user.role
+        });
       } else {
         console.warn("[Session Callback] Token ou session.user ausente. Não foi possível popular.");
       }
-      console.log("[Session Callback] Retornando objeto session final:", { userId: session.user?.id, userRole: session.user?.role });
       return session;
     },
   },
   secret: process.env.NEXTAUTH_SECRET, // Essencial para JWT
   debug: !isProduction,
   cookies: {
-    // --- CONFIGURAÇÃO DE COOKIES PADRÃO/RECOMENDADA ---
+    // Configuração simplificada para evitar problemas com __Host prefix
     sessionToken: {
-      name: `${isProduction ? '__Host-' : ''}next-auth.session-token`,
+      name: 'next-auth.session-token',
       options: {
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
-        secure: isProduction,
-        // domain: undefined, // Deixar o navegador inferir o domínio (__Host- não permite domain)
-      },
+        secure: isProduction
+      }
     },
     callbackUrl: {
-      name: `${isProduction ? '__Host-' : ''}next-auth.callback-url`,
+      name: 'next-auth.callback-url',
       options: {
         sameSite: 'lax',
         path: '/',
-        secure: isProduction,
-        // domain: undefined,
-      },
+        secure: isProduction
+      }
     },
     csrfToken: {
-      name: `${isProduction ? '__Host-' : ''}next-auth.csrf-token`,
+      name: 'next-auth.csrf-token',
       options: {
         httpOnly: true,
         sameSite: 'lax',
         path: '/',
-        secure: isProduction,
-        // domain: undefined,
-      },
-    },
-    // --- FIM DA CONFIGURAÇÃO PADRÃO ---
+        secure: isProduction
+      }
+    }
   },
   events: {
       async signIn(message) { console.log("[Event: signIn]", { user: message.user.email, account: message.account?.provider }); },
-      async session(message) { console.log("[Event: session]", { tokenUserId: message.token?.id }); },
+      async session(message) { console.log("[Event: session]", { tokenUserId: message.token?.id || message.token?.sub }); },
       // Adicione logs para outros eventos se precisar depurar mais
   },
 };
