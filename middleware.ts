@@ -12,7 +12,15 @@ export async function middleware(request: NextRequest) {
   // Obter token da requisição
   let token = null;
   try {
-      token = await getToken({ req: request, secret });
+      token = await getToken({ 
+        req: request, 
+        secret,
+        secureCookie: process.env.NODE_ENV === 'production' // Usar cookies seguros em produção
+      });
+      // Log detalhado para depuração
+      console.log(`[Middleware] Token obtido:`, token ? 'Sim' : 'Não', 
+                 `JWT Sub: ${token?.sub || 'N/A'}`, 
+                 `Exp: ${token?.exp || 'N/A'}`);
   } catch (error) {
       console.error('[Middleware] Erro ao chamar getToken:', error);
       token = null;
@@ -28,8 +36,8 @@ export async function middleware(request: NextRequest) {
   const protectedRoutes = ['/dashboard', '/api/dashboard', '/api/despesas', '/api/documents', '/api/drive', '/api/empreendimentos', '/api/notifications', '/api/sheets', '/api/upload-s3'];
   const publicRoutes = ['/login', '/api/auth/providers', '/api/auth/csrf', '/api/auth/callback', '/api/auth/signout', '/api/auth/error', '/api/create-admin', '/api/test'];
 
-  // Verificar se é uma rota de API de autenticação
-  const isApiAuthRoute = pathname.startsWith('/api/auth');
+  // Verificar se é uma rota de API de autenticação ou relacionada à sessão
+  const isApiAuthRoute = pathname.startsWith('/api/auth') || pathname === '/api/auth/session';
   
   // Verificar se é uma rota protegida
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
@@ -48,16 +56,18 @@ export async function middleware(request: NextRequest) {
 
   // 3. Se está no /login E JÁ autenticado -> Redireciona para /dashboard
   if (pathname === '/login' && isAuthenticated) {
-      console.log(`[Middleware] Redirecionando usuário autenticado DE /login PARA /dashboard`);
-      return NextResponse.redirect(new URL('/dashboard', request.url));
+      console.log(`[Middleware] Redirecionando usuário autenticado DE /login PARA /dashboard. Token ID: ${token?.id ?? 'N/A'}`);
+      const dashboardUrl = new URL('/dashboard', request.url);
+      return NextResponse.redirect(dashboardUrl);
   }
 
   // 4. Se tenta acessar rota PROTEGIDA e NÃO está autenticado -> Redireciona para /login
   if (isProtectedRoute && !isAuthenticated) {
-      console.log(`[Middleware] Redirecionando usuário não autenticado DE ${pathname} PARA /login`);
-      // Usar apenas o pathname como callback para evitar problemas com URLs completas
+      console.log(`[Middleware] Redirecionando usuário não autenticado DE ${pathname} PARA /login. Token ausente ou inválido.`);
+      // Criar URL de login sem parâmetros adicionais para evitar problemas
       const loginUrl = new URL('/login', request.url);
-      // Não definir callbackUrl para evitar problemas de redirecionamento
+      // Limpar qualquer query string existente
+      loginUrl.search = '';
       return NextResponse.redirect(loginUrl);
   }
 
