@@ -7,7 +7,7 @@ const withPWA = nextPWA({
   dest: 'public',
   register: true,
   skipWaiting: true,
-  disable: isDev,
+  disable: false, // Alterado de isDev para false para habilitar o PWA em todos os ambientes
 });
 
 /** @type {import('next').NextConfig} */
@@ -27,12 +27,10 @@ const nextConfig = {
       },
     ],
   },
+  // Atualizado conforme recomendação do Next.js
+  serverExternalPackages: ['mongoose', 'mongodb'],
   experimental: {
-    // Remove serverExternalPackages and replace with the correct option if needed
-    // serverExternalPackages: ['your-packages'],
-    
-    // If you need similar functionality, use serverComponentsExternalPackages instead
-    serverComponentsExternalPackages: ['mongoose', 'mongodb'],
+    // Mantendo experimental para outras configurações futuras
   },
   logging: {
     fetches: {
