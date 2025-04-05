@@ -1,22 +1,23 @@
+// app/layout.tsx
 import type React from "react";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import "./globals.css";
+import "./globals.css"; // Ou styles/globals.css
 import { ThemeProvider } from "@/components/theme-provider";
-import { Toaster } from "@/components/ui/toaster";
-import ClientSessionProvider from "@/contexts/client-session-provider";
+import { Toaster } from "@/components/ui/toaster"; // Ou sonner
+import ClientSessionProvider from "@/contexts/client-session-provider"; // CORRIJA O CAMINHO SE NECESSÁRIO
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Scotta Empreendimentos Dashboard",
-  description: "Manage your Scotta Empreendimentos and expenses efficiently",
+  title: "Dashboard Imobiliário - Gestão de Empreendimentos",
+  description: "Gerencie seus empreendimentos imobiliários e despesas de forma eficiente",
   manifest: "/manifest.json",
-  applicationName: "Scotta Gestão",
+  applicationName: "Dashboard Imobiliário",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Scotta Gestão",
+    title: "Dashboard Imobiliário",
   },
   formatDetection: {
     telephone: false,
@@ -30,14 +31,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
-      <head>{/* Escrever tudo em uma linha para evitar nós de texto em branco */}<meta name="viewport" content="width=device-width, initial-scale=1.0" /><link rel="manifest" href="/manifest.json" /><meta name="theme-color" content="#44c3a3" /><link rel="apple-touch-icon" href="/icons/icon-512x512.png" /><meta name="apple-mobile-web-app-capable" content="yes" /><meta name="apple-mobile-web-app-status-bar-style" content="default" /><meta name="apple-mobile-web-app-title" content="Scotta Gestão" /></head>
+      <head>{/* Meta tags PWA etc */}</head>
       <body className={inter.className}>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-          <ClientSessionProvider>
+        {/* ClientSessionProvider envolve ThemeProvider e children para garantir acesso à sessão */}
+        <ClientSessionProvider>
+          <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
             {children}
-          </ClientSessionProvider>
-          <Toaster />
-        </ThemeProvider>
+            <Toaster />
+          </ThemeProvider>
+        </ClientSessionProvider>
       </body>
     </html>
   );
