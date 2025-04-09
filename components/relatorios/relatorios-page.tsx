@@ -1,7 +1,7 @@
 // components/relatorios/relatorios-page.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react"; // Added useCallback
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useRelatorios } from '@/hooks/useRelatorios';
@@ -14,13 +14,14 @@ import CategoriasView from './CategoriasView';
 import TendenciasView from './TendenciasView';
 import ComparativoView from './ComparativoView';
 import RelatoriosFiltros from "./RelatoriosFiltros";
-import type { DateRange } from "react-day-picker"; // Import DateRange type
+import type { DateRange } from "react-day-picker";
+import { cn } from "@/lib/utils"; // Import cn if not already imported
 
 export default function RelatoriosPageClient() {
   const { data: session, status } = useSession();
   const [activeTab, setActiveTab] = useState("dashboard");
 
-  // Call hooks at the top level
+  // Hooks (no changes needed here)
   const {
     kpis,
     orcamento,
@@ -30,16 +31,14 @@ export default function RelatoriosPageClient() {
     comparativoPeriodo,
     dateRange,
     empreendimentoId,
-    updateDateRange, // This is the state setter: React.Dispatch<React.SetStateAction<DateRange>>
+    updateDateRange,
     updateEmpreendimento,
     isLoading,
-    exportarRelatorio, // Keep export function
-    // Removed isExportando from destructuring
+    exportarRelatorio,
   } = useRelatorios(activeTab);
 
   const { empreendimentos, isLoading: loadingEmpreendimentos } = useEmpreendimentos();
 
-  // Define availableTabs after hooks
   const availableTabs = useMemo(() => [
     { value: "dashboard", icon: BarChart3, label: "Dashboard" },
     { value: "despesas", icon: Wallet, label: "Despesas" },
@@ -54,21 +53,23 @@ export default function RelatoriosPageClient() {
     }
   }, [status, activeTab, availableTabs]);
 
-  // *** FIX: Wrapper function for date range change ***
   const handleDateRangeChange = useCallback((newRange: DateRange | undefined) => {
-    // updateDateRange is the state setter, it can accept the new value directly
-    updateDateRange(newRange || { from: undefined, to: undefined }); // Handle undefined case if necessary
+    updateDateRange(newRange || { from: undefined, to: undefined });
   }, [updateDateRange]);
-  // *** END FIX ***
 
   const isOverallLoading = status === "loading" || loadingEmpreendimentos || isLoading;
 
   if (isOverallLoading) {
-     // Skeleton remains the same
      return (
        <div className="p-4 sm:p-6 lg:p-8 space-y-6 animate-pulse">
-         <Skeleton className="h-12 w-full sm:w-1/2" /> {/* Filters Skeleton */}
-         <Skeleton className="h-10 w-full max-w-[800px] mx-auto" /> {/* TabsList Skeleton */}
+         {/* Filters Skeleton - Keep as is */}
+         <div className="flex flex-col sm:flex-row gap-2">
+            <Skeleton className="h-9 w-full sm:w-64" />
+            <Skeleton className="h-9 w-full sm:w-64" />
+         </div>
+         {/* TabsList Skeleton - Keep as is */}
+         <Skeleton className="h-10 w-full max-w-[800px] mx-auto" />
+         {/* Content Skeleton - Keep as is */}
          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
            <Skeleton className="h-64 w-full" />
            <Skeleton className="h-64 w-full" />
@@ -81,29 +82,48 @@ export default function RelatoriosPageClient() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6">
+      {/* Filtros - Keep as is */}
       <RelatoriosFiltros
         dateRange={dateRange}
         empreendimentoId={empreendimentoId}
         empreendimentos={empreendimentos || []}
         isLoading={loadingEmpreendimentos || isLoading}
-        // *** FIX: Pass the wrapper function ***
         onChangeDateRange={handleDateRangeChange}
-        // *** END FIX ***
         onChangeEmpreendimento={updateEmpreendimento}
       />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        {/* TabsList and TabsContent remain the same */}
-         <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-5 max-w-[800px] mx-auto">
+        {/* ===== RESPONSIVE TabsList START ===== */}
+        <TabsList className={cn(
+            "flex flex-wrap h-auto justify-center", // Use flex-wrap and allow auto height
+            "rounded-md bg-muted p-1 text-muted-foreground", // Original background/text styles
+            "max-w-[800px] mx-auto gap-1" // Keep max-width, centering and add gap
+        )}>
           {availableTabs.map(tab => (
-            <TabsTrigger key={tab.value} value={tab.value} className="flex items-center justify-center gap-1 sm:gap-2 text-xs sm:text-sm px-2 py-1.5 h-9">
-              <tab.icon className="h-4 w-4 flex-shrink-0" />
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              // Removed flex-1, adjusted padding/height for better wrapping
+              className={cn(
+                  "inline-flex items-center justify-center whitespace-nowrap rounded-sm",
+                  "px-3 py-1.5 h-9", // Consistent padding and height
+                  "text-xs sm:text-sm font-medium",
+                  "ring-offset-background transition-all",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  "disabled:pointer-events-none disabled:opacity-50",
+                  "data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+              )}
+            >
+              <tab.icon className="h-4 w-4 flex-shrink-0 mr-1.5" /> {/* Added margin */}
               <span className="truncate">{tab.label}</span>
             </TabsTrigger>
           ))}
         </TabsList>
+        {/* ===== RESPONSIVE TabsList END ===== */}
 
-        <TabsContent value="dashboard">
+
+        {/* TabsContent - Keep as is */}
+        <TabsContent value="dashboard" className="mt-4"> {/* Added mt-4 for spacing */}
           <RelatoriosDashboardView
             kpis={kpis}
             orcamento={orcamento}
@@ -114,25 +134,25 @@ export default function RelatoriosPageClient() {
           />
         </TabsContent>
 
-        <TabsContent value="despesas">
+        <TabsContent value="despesas" className="mt-4">
           <DespesasDetalhadasView
             dateRange={dateRange}
             empreendimentoId={empreendimentoId}
           />
         </TabsContent>
 
-        <TabsContent value="categorias">
+        <TabsContent value="categorias" className="mt-4">
            <CategoriasView data={despesasPorCategoria} isLoading={isLoading} />
         </TabsContent>
 
-        <TabsContent value="tendencias">
+        <TabsContent value="tendencias" className="mt-4">
           <TendenciasView
             data={{ tendencias, despesasPorTempo }}
             isLoading={isLoading}
           />
         </TabsContent>
 
-        <TabsContent value="comparativo">
+        <TabsContent value="comparativo" className="mt-4">
            <ComparativoView data={comparativoPeriodo} isLoading={isLoading} />
         </TabsContent>
       </Tabs>
