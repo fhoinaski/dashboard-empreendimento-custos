@@ -91,6 +91,7 @@ export default function DespesasEmpreendimentoListPage() {
   const handleMarkAsPaid = useCallback(async (expenseId: string) => {
     try {
       setUpdatingExpenseId(expenseId); // Set the ID being updated
+      // Corrigido: Passando apenas o status para evitar problemas de tipo com paymentMethod
       await updateDespesa(expenseId, { status: "Pago" });
     } catch (error) {
       console.error("Erro ao marcar despesa como paga (component):", error);

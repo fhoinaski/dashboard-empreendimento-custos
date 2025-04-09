@@ -1,8 +1,9 @@
-// hooks/useDespesas.ts
+
 import { trpc } from '@/lib/trpc/client';
 import { useCallback, useState, useEffect } from 'react';
-// Import PaginationInfo now that it's exported from types.ts
-import { DespesaFilterParams, CreateDespesaFormInput, UpdateDespesaFormInput, PaginationInfo } from '@/lib/trpc/types';
+
+import { DespesaFilterParams, CreateDespesaInput, UpdateDespesaFormInput, PaginationInfo } from '@/lib/trpc/types';
+
 import { useToast } from '@/components/ui/use-toast';
 import { TRPCClientErrorLike } from '@trpc/client';
 import { AppRouter } from '@/server/api/root';
@@ -45,7 +46,7 @@ export function useDespesas() {
   const resetFilters = useCallback(() => { setFilters({ page: 1, limit: 10, status: undefined, approvalStatus: undefined, category: undefined, empreendimento: undefined, startDate: undefined, endDate: undefined, search: undefined, sortBy: undefined, sortOrder: undefined, }); }, []);
 
   // Action functions remain the same
-  const createDespesa = useCallback(async (data: CreateDespesaFormInput) => createDespesaMutation.mutateAsync(data), [createDespesaMutation]);
+  const createDespesa = useCallback(async (data: CreateDespesaInput) => createDespesaMutation.mutateAsync(data), [createDespesaMutation]);
   const updateDespesa = useCallback(async (id: string, data: UpdateDespesaFormInput) => updateDespesaMutation.mutateAsync({ id, data }), [updateDespesaMutation]);
   const deleteDespesa = useCallback(async (id: string) => deleteDespesaMutation.mutateAsync({ id }), [deleteDespesaMutation]);
   const approveDespesa = useCallback(async (id: string, comments?: string) => reviewDespesaMutation.mutateAsync({ id, approvalStatus: 'Aprovado', notes: comments }), [reviewDespesaMutation]);

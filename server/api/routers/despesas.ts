@@ -293,6 +293,3 @@ export const despesasRouter = router({
 });
 
 export type DespesasRouter = typeof despesasRouter;
-// ============================================================
-// END OF REFACTORED FILE: server/api/routers/despesas.ts
-// ============================================================
