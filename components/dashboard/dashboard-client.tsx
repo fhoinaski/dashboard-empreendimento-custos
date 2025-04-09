@@ -2,7 +2,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import DashboardOverview from "@/components/dashboard/dashboard-overview";
+import {DashboardOverview} from "@/components/dashboard/dashboard-overview";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // Interface para as props recebidas do servidor

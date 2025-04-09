@@ -3,7 +3,7 @@
 import { useState } from "react";
 import DashboardHeader from "@/components/dashboard/dashboard-header";
 import DashboardSidebar from "@/components/dashboard/dashboard-sidebar";
-import { NotificationProvider } from "@/contexts/NotificationContext";
+import { NotificationProvider } from "@/contexts/notification-context";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

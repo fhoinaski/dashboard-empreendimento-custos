@@ -1,11 +1,12 @@
+// components/configuracoes/user-settings-table.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSession } from 'next-auth/react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Plus, Trash2, Loader2, KeyRound, Save, Eye, EyeOff, Edit } from 'lucide-react';
+import { Plus, Trash2, Loader2, KeyRound, Save, Eye, EyeOff, Edit, Search } from 'lucide-react'; // Adicionado Search
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -17,22 +18,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { MultiSelect } from '../ui/multi-select';
+import { MultiSelect } from '../ui/multi-select'; // Mantido MultiSelect
+import { useEmpreendimentos } from '@/hooks/useEmpreendimentos'; // Hook para buscar empreendimentos
+import { useDebounce } from '@/utils/debounce'; // Hook debounce
+import { trpc } from '@/lib/trpc/client'; // Cliente tRPC
+import { PaginationControls } from '@/components/ui/pagination/pagination-controls'; // Controle de Paginação
+// Importar tipos do backend
+import type { UserResponse, CreateUserInput, UpdateUserInput, AdminUpdatePasswordInput } from '@/server/api/schemas/auth'; // Tipos de usuário e inputs
 
-
-
+// --- Schemas Zod dos Formulários (Mantidos) ---
 const newUserSchema = z.object({
     name: z.string().min(3, "Nome muito curto"),
     email: z.string().email("Email inválido"),
     password: z.string().min(6, "Senha: mínimo 6 caracteres"),
-    role: z.string().min(1, "Função é obrigatória"),
-    assignedEmpreendimentos: z.array(z.string()).optional(),
+    role: z.enum(['admin', 'manager', 'user'], { required_error: "Função é obrigatória" }),
+    assignedEmpreendimentos: z.array(z.string()).optional(), // Mantém array de strings (IDs)
 });
 type NewUserFormData = z.infer<typeof newUserSchema>;
 
 const editUserSchema = z.object({
     name: z.string().min(3, "Nome muito curto"),
-    role: z.string().min(1, "Função é obrigatória"),
+    role: z.enum(['admin', 'manager', 'user'], { required_error: "Função é obrigatória" }),
     assignedEmpreendimentos: z.array(z.string()).optional(),
 });
 type EditUserFormData = z.infer<typeof editUserSchema>;
@@ -41,199 +47,164 @@ const adminPasswordChangeSchema = z.object({
     newPassword: z.string().min(6, "Nova senha: mínimo 6 caracteres"),
     confirmPassword: z.string()
 }).refine(data => data.newPassword === data.confirmPassword, {
-    message: "As novas senhas não coincidem",
-    path: ["confirmPassword"],
+    message: "As novas senhas não coincidem", path: ["confirmPassword"],
 });
 type AdminPasswordChangeFormData = z.infer<typeof adminPasswordChangeSchema>;
 
-interface AssignedEmpreendimento { _id: string; name: string; }
-interface UserData {
-    _id: string; name: string; email: string; role: string; createdAt: string;
-    assignedEmpreendimentos?: AssignedEmpreendimento[];
-}
-interface UserPagination { total: number; page: number; limit: number; totalPages: number; }
+// Interface para opções do MultiSelect
 interface EmpreendimentoOption { value: string; label: string; }
+// Usar UserResponse como tipo principal para dados de usuário vindo do tRPC
+type UserData = UserResponse;
 
 export default function UserSettingsTable() {
     const { data: session } = useSession();
     const { toast } = useToast();
-    const [isLoading, setIsLoading] = useState(true);
-    const [isSubmitting, setIsSubmitting] = useState<string | false>(false);
-    const [users, setUsers] = useState<UserData[]>([]);
-    const [userPagination, setUserPagination] = useState<UserPagination>({ total: 0, page: 1, limit: 10, totalPages: 1 });
-    const [userSearchTerm, setUserSearchTerm] = useState('');
+
+    // --- Estados Locais ---
+    const [currentPage, setCurrentPage] = useState(1);
+    const [limit] = useState(10); // Limite fixo por página
+    const [searchTerm, setSearchTerm] = useState('');
     const [newUserDialogOpen, setNewUserDialogOpen] = useState(false);
     const [editUserDialogOpen, setEditUserDialogOpen] = useState(false);
     const [deleteUserDialogOpen, setDeleteUserDialogOpen] = useState(false);
     const [passwordChangeDialogOpen, setPasswordChangeDialogOpen] = useState(false);
     const [userToModify, setUserToModify] = useState<UserData | null>(null);
     const [showPasswordFields, setShowPasswordFields] = useState(false);
-    const [allEmpreendimentos, setAllEmpreendimentos] = useState<EmpreendimentoOption[]>([]);
-    const [isFetchingEmpreendimentos, setIsFetchingEmpreendimentos] = useState(true);
+    // Remover estado local `users` e `userPagination`, usar dados do tRPC query
+    // Remover estado local `isLoading`, usar o do tRPC query
 
-    const newUserForm = useForm<NewUserFormData>({
-        resolver: zodResolver(newUserSchema),
-        defaultValues: { name: '', email: '', password: '', role: '', assignedEmpreendimentos: [] },
-    });
-    const editUserForm = useForm<EditUserFormData>({
-        resolver: zodResolver(editUserSchema),
-        defaultValues: { name: '', role: '', assignedEmpreendimentos: [] },
-    });
-    const passwordChangeForm = useForm<AdminPasswordChangeFormData>({
-        resolver: zodResolver(adminPasswordChangeSchema),
-        defaultValues: { newPassword: '', confirmPassword: '' },
-    });
+    const debouncedSearchTerm = useDebounce(searchTerm, 500); // Debounce para busca
 
-    const fetchUsersData = useCallback(async (page = 1, limit = 10, search = '') => {
-        setIsLoading(true);
-        try {
-            const params = new URLSearchParams({ page: String(page), limit: String(limit), q: search });
-            const response = await fetch(`/api/users?${params.toString()}`);
-            if (!response.ok) throw new Error(`Falha ao buscar usuários (${response.status})`);
-            const data = await response.json();
-            console.log('[fetchUsersData] Dados recebidos:', data); // Log para depuração
-            setUsers(data.users || []);
-            setUserPagination(data.pagination || { total: 0, page: 1, limit: 10, totalPages: 1 });
-        } catch (error) {
-            console.error("Erro fetchUsersData:", error);
-            toast({ variant: "destructive", title: "Erro", description: "Não foi possível carregar usuários." });
-            setUsers([]);
-            setUserPagination({ total: 0, page: 1, limit: 10, totalPages: 1 });
-        } finally {
-            setIsLoading(false);
+    // --- Hooks de Formulário ---
+    const newUserForm = useForm<NewUserFormData>({ resolver: zodResolver(newUserSchema), defaultValues: { name: '', email: '', password: '', role: undefined, assignedEmpreendimentos: [] }, });
+    const editUserForm = useForm<EditUserFormData>({ resolver: zodResolver(editUserSchema), defaultValues: { name: '', role: undefined, assignedEmpreendimentos: [] }, });
+    const passwordChangeForm = useForm<AdminPasswordChangeFormData>({ resolver: zodResolver(adminPasswordChangeSchema), defaultValues: { newPassword: '', confirmPassword: '' }, });
+
+    // --- tRPC Queries ---
+    // Busca de Usuários Paginada com tRPC
+    const usersQuery = trpc.users.getAll.useQuery(
+        { page: currentPage, limit, searchTerm: debouncedSearchTerm || undefined },
+        {
+            staleTime: 5 * 60 * 1000, // 5 minutos stale time
+            placeholderData: (previousData) => previousData, // Mantém dados anteriores enquanto carrega novos
+            // onError já é tratado pelo hook useSettings (se ele existir e for usado)
+            // ou pode ser tratado aqui se necessário
         }
-    }, [toast]);
+    );
+    // Hook para buscar empreendimentos para o MultiSelect
+    const { empreendimentos: backendEmpreendimentos, isLoading: isFetchingEmpreendimentos } = useEmpreendimentos();
 
-    const fetchEmpreendimentos = useCallback(async () => {
-        setIsFetchingEmpreendimentos(true);
-        try {
-            const response = await fetch('/api/empreendimentos?limit=999');
-            if (!response.ok) throw new Error(`Falha ao buscar empreendimentos (${response.status})`);
-            const data = await response.json();
-            if (data?.empreendimentos) {
-                setAllEmpreendimentos(data.empreendimentos.map((emp: any) => ({ value: emp._id, label: emp.name })));
-            }
-        } catch (error) {
-            console.error("Erro fetchEmpreendimentos:", error);
-            toast({ variant: "destructive", title: "Erro", description: "Não foi possível carregar empreendimentos." });
-        } finally {
-            setIsFetchingEmpreendimentos(false);
-        }
-    }, [toast]);
+    // Mapeia empreendimentos para o formato do MultiSelect
+    const empreendimentoOptions = useMemo((): EmpreendimentoOption[] => {
+        // Garante que backendEmpreendimentos é um array antes de mapear
+        return (backendEmpreendimentos || []).map(emp => ({ value: emp._id, label: emp.name }));
+    }, [backendEmpreendimentos]);
 
-    useEffect(() => { fetchEmpreendimentos(); }, [fetchEmpreendimentos]);
-    useEffect(() => { fetchUsersData(userPagination.page, userPagination.limit, userSearchTerm); }, [fetchUsersData, userPagination.page, userPagination.limit, userSearchTerm]);
 
+    // --- tRPC Mutations ---
+    // Usar as mutations diretamente do tRPC client
+    const utils = trpc.useContext(); // Contexto para invalidação
+    const createUserMutation = trpc.auth.register.useMutation({
+        onSuccess: (data) => { toast({ title: "Sucesso", description: data.message }); setNewUserDialogOpen(false); newUserForm.reset(); utils.users.getAll.invalidate(); }, // Invalida a query de usuários
+        onError: (error) => { toast({ variant: "destructive", title: "Erro ao Criar", description: error.message }); }
+    });
+    const editUserMutation = trpc.users.update.useMutation({
+        onSuccess: (data) => { toast({ title: "Sucesso", description: data.message }); setEditUserDialogOpen(false); setUserToModify(null); utils.users.getAll.invalidate(); utils.users.getById.invalidate({ id: data.user._id }); }, // Invalida getAll e getById específico
+        onError: (error) => { toast({ variant: "destructive", title: "Erro ao Editar", description: error.message }); }
+    });
+    const deleteUserMutation = trpc.users.delete.useMutation({
+        onSuccess: (data) => { toast({ title: "Sucesso", description: data.message }); setDeleteUserDialogOpen(false); setUserToModify(null); utils.users.getAll.invalidate(); },
+        onError: (error) => { toast({ variant: "destructive", title: "Erro ao Excluir", description: error.message }); }
+    });
+    const changePasswordMutation = trpc.users.updatePassword.useMutation({
+        onSuccess: (data) => { toast({ title: "Sucesso", description: data.message }); setPasswordChangeDialogOpen(false); passwordChangeForm.reset(); setUserToModify(null); },
+        onError: (error) => { toast({ variant: "destructive", title: "Erro ao Alterar Senha", description: error.message }); }
+    });
+
+    // Estados de Loading das Mutations
+    const isCreatingUser = createUserMutation.isPending;
+    const isEditingUser = editUserMutation.isPending;
+    const isDeletingUser = deleteUserMutation.isPending;
+    const isChangingPassword = changePasswordMutation.isPending;
+    // Estado geral de submitting para desabilitar botões de ação na tabela
+    const isActionSubmitting = isEditingUser || isDeletingUser || isChangingPassword;
+
+
+    // --- Handlers (agora chamam as mutations tRPC) ---
     const handleNewUserSubmit = useCallback(async (values: NewUserFormData) => {
-        setIsSubmitting('newUser');
-        try {
-            const payload = values.role === 'user' ? values : { ...values, assignedEmpreendimentos: [] };
-            console.log("[handleNewUserSubmit] Payload:", payload);
-            const response = await fetch('/api/auth/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Falha ao adicionar usuário');
-            toast({ title: "Sucesso", description: data.message });
-            setNewUserDialogOpen(false);
-            newUserForm.reset();
-            fetchUsersData();
-        } catch (error) {
-            console.error("[handleNewUserSubmit] Error:", error);
-            toast({ variant: "destructive", title: "Erro", description: error instanceof Error ? error.message : "Falha ao adicionar usuário" });
-        } finally {
-            setIsSubmitting(false);
-        }
-    }, [toast, newUserForm, fetchUsersData]);
+        // Preparar input conforme esperado pela mutation trpc.auth.register (CreateUserInput)
+        const inputData: CreateUserInput = {
+            name: values.name,
+            email: values.email,
+            password: values.password,
+            role: values.role,
+            // Garante que assignedEmpreendimentos seja undefined se não for role 'user'
+            assignedEmpreendimentos: values.role === 'user' ? values.assignedEmpreendimentos : undefined,
+        };
+        await createUserMutation.mutateAsync(inputData);
+    }, [createUserMutation, newUserForm]); // Adicionado newUserForm à dependência
 
     const handleEditUserSubmit = useCallback(async (values: EditUserFormData) => {
-        if (!userToModify) return;
-        setIsSubmitting(`edit-${userToModify._id}`);
-        try {
-            const payload = values.role === 'user' ? values : { ...values, assignedEmpreendimentos: [] };
-            console.log("[handleEditUserSubmit] Payload:", payload);
-            const response = await fetch(`/api/users/${userToModify._id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Falha ao atualizar usuário');
-            toast({ title: "Sucesso", description: data.message });
-            setEditUserDialogOpen(false);
-            setUserToModify(null);
-            fetchUsersData();
-        } catch (error) {
-            console.error("[handleEditUserSubmit] Error:", error);
-            toast({ variant: "destructive", title: "Erro", description: error instanceof Error ? error.message : "Falha ao atualizar" });
-        } finally {
-            setIsSubmitting(false);
-        }
-    }, [toast, userToModify, fetchUsersData]);
+        if (!userToModify?._id) return;
+        // Preparar input conforme esperado pela mutation trpc.users.update ({ id: string, data: UpdateUserInput })
+        const inputData: UpdateUserInput = {
+            name: values.name,
+            role: values.role,
+             // Garante que assignedEmpreendimentos seja undefined se não for role 'user'
+             assignedEmpreendimentos: values.role === 'user' ? values.assignedEmpreendimentos : [], // Envia array vazio para limpar se role != user
+        };
+        await editUserMutation.mutateAsync({ id: userToModify._id, data: inputData });
+    }, [editUserMutation, userToModify]);
 
     const handleDeleteUser = useCallback(async () => {
-        if (!userToModify) return;
-        setIsSubmitting(`delete-${userToModify._id}`);
-        try {
-            const response = await fetch(`/api/users/${userToModify._id}`, { method: 'DELETE' });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Falha ao excluir');
-            toast({ title: "Sucesso", description: data.message });
-            setDeleteUserDialogOpen(false);
-            setUserToModify(null);
-            fetchUsersData();
-        } catch (error) {
-            console.error("Delete error:", error);
-            toast({ variant: "destructive", title: "Erro", description: error instanceof Error ? error.message : "Falha." });
-        } finally {
-            setIsSubmitting(false);
-        }
-    }, [toast, userToModify, fetchUsersData]);
+        if (!userToModify?._id) return;
+        await deleteUserMutation.mutateAsync({ id: userToModify._id });
+    }, [deleteUserMutation, userToModify]);
 
     const handleAdminPasswordChangeSubmit = useCallback(async (values: AdminPasswordChangeFormData) => {
-        if (!userToModify) return;
-        setIsSubmitting(`passwordChange-${userToModify._id}`);
-        try {
-            const response = await fetch(`/api/users/${userToModify._id}/password`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password: values.newPassword }),
-            });
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.error || 'Falha ao alterar');
-            toast({ title: "Sucesso", description: data.message });
-            setPasswordChangeDialogOpen(false);
-            passwordChangeForm.reset();
-            setUserToModify(null);
-        } catch (error) {
-            console.error("Password change error:", error);
-            toast({ variant: "destructive", title: "Erro", description: error instanceof Error ? error.message : "Falha." });
-        } finally {
-            setIsSubmitting(false);
-        }
-    }, [toast, userToModify, passwordChangeForm]);
+        if (!userToModify?._id) return;
+         // Preparar input conforme esperado pela mutation trpc.users.updatePassword ({ id: string, data: AdminUpdatePasswordInput })
+         const inputData: AdminUpdatePasswordInput = {
+             password: values.newPassword,
+             // confirmPassword não é enviado
+         };
+        await changePasswordMutation.mutateAsync({ id: userToModify._id, data: inputData });
+    }, [changePasswordMutation, userToModify, passwordChangeForm]); // Adicionado passwordChangeForm à dependência
 
+
+    // --- Funções para abrir Dialogs (sem alterações na lógica, mas ajustam o reset) ---
     const openPasswordDialog = (user: UserData) => {
         setUserToModify(user);
-        passwordChangeForm.reset();
+        passwordChangeForm.reset(); // Reseta form ao abrir
         setPasswordChangeDialogOpen(true);
         setShowPasswordFields(false);
     };
     const openEditDialog = (user: UserData) => {
         setUserToModify(user);
+        // Popula o form com os dados do usuário selecionado
         editUserForm.reset({
             name: user.name,
             role: user.role,
+            // Mapeia de volta para array de IDs (strings)
             assignedEmpreendimentos: user.assignedEmpreendimentos?.map(emp => emp._id) || []
         });
         setEditUserDialogOpen(true);
     };
+     const openDeleteDialog = (user: UserData) => {
+         setUserToModify(user);
+         setDeleteUserDialogOpen(true);
+     };
 
+    // --- Watchers de Formulário (sem alterações) ---
     const watchNewUserRole = newUserForm.watch("role");
     const watchEditUserRole = editUserForm.watch("role");
 
+    // --- Variáveis derivadas dos dados tRPC ---
+    const users = usersQuery.data?.users || [];
+    const pagination = usersQuery.data?.pagination;
+    const isLoadingUsers = usersQuery.isLoading || usersQuery.isFetching; // Combina estados de loading da query
+
+    // --- Renderização ---
     return (
         <TooltipProvider>
             <Card>
@@ -242,42 +213,34 @@ export default function UserSettingsTable() {
                         <CardTitle>Gerenciamento de Usuários</CardTitle>
                         <CardDescription>Adicione, edite ou remova usuários do sistema.</CardDescription>
                     </div>
+                    {/* --- Dialog Novo Usuário --- */}
                     <Dialog open={newUserDialogOpen} onOpenChange={setNewUserDialogOpen}>
                         <DialogTrigger asChild>
-                            <Button size="sm" className="w-full md:w-auto"> <Plus className="mr-2 h-4 w-4" /> Novo Usuário </Button>
+                            {/* Desabilitar botão se estiver carregando empreendimentos */}
+                            <Button size="sm" className="w-full md:w-auto" disabled={isFetchingEmpreendimentos}>
+                                {isFetchingEmpreendimentos ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+                                Novo Usuário
+                            </Button>
                         </DialogTrigger>
                         <DialogContent className="sm:max-w-[500px]">
                             <DialogHeader><DialogTitle>Adicionar Novo Usuário</DialogTitle></DialogHeader>
                             <FormProvider {...newUserForm}>
                                 <form onSubmit={newUserForm.handleSubmit(handleNewUserSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-                                    <FormField control={newUserForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Nome</FormLabel><FormControl><Input {...field} disabled={isSubmitting === 'newUser'} /></FormControl><FormMessage /></FormItem>)} />
-                                    <FormField control={newUserForm.control} name="email" render={({ field }) => (<FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" {...field} disabled={isSubmitting === 'newUser'} /></FormControl><FormMessage /></FormItem>)} />
-                                    <FormField control={newUserForm.control} name="password" render={({ field }) => (<FormItem><FormLabel>Senha</FormLabel><FormControl><Input type="password" {...field} disabled={isSubmitting === 'newUser'} /></FormControl><FormMessage /></FormItem>)} />
-                                    <FormField control={newUserForm.control} name="role" render={({ field }) => (
-                                        <FormItem><FormLabel>Função</FormLabel><Select onValueChange={field.onChange} value={field.value} disabled={isSubmitting === 'newUser'}><FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="manager">Gerente</SelectItem><SelectItem value="user">Usuário</SelectItem></SelectContent></Select><FormMessage /></FormItem>
-                                    )} />
+                                    {/* Campos do formulário (sem alterações visuais, mas 'disabled' usa isCreatingUser) */}
+                                     <FormField control={newUserForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Nome</FormLabel><FormControl><Input {...field} disabled={isCreatingUser} /></FormControl><FormMessage /></FormItem>)} />
+                                     <FormField control={newUserForm.control} name="email" render={({ field }) => (<FormItem><FormLabel>Email</FormLabel><FormControl><Input type="email" {...field} disabled={isCreatingUser} /></FormControl><FormMessage /></FormItem>)} />
+                                     <FormField control={newUserForm.control} name="password" render={({ field }) => (<FormItem><FormLabel>Senha</FormLabel><FormControl><Input type="password" {...field} disabled={isCreatingUser} /></FormControl><FormMessage /></FormItem>)} />
+                                     <FormField control={newUserForm.control} name="role" render={({ field }) => ( <FormItem><FormLabel>Função</FormLabel><Select onValueChange={field.onChange} value={field.value} disabled={isCreatingUser}><FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="manager">Gerente</SelectItem><SelectItem value="user">Usuário</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
                                     {watchNewUserRole === 'user' && (
                                         <FormField control={newUserForm.control} name="assignedEmpreendimentos" render={({ field }) => (
-                                            <FormItem>
-                                                <FormLabel>Empreendimentos Atribuídos</FormLabel>
-                                                <FormControl>
-                                                    <MultiSelect
-                                                        options={allEmpreendimentos}
-                                                        selected={field.value || []}
-                                                        onChange={field.onChange}
-                                                        isLoading={isFetchingEmpreendimentos}
-                                                        disabled={isSubmitting === 'newUser'}
-                                                        placeholder="Selecione..."
-                                                    />
-                                                </FormControl>
-                                                <FormMessage />
-                                            </FormItem>
+                                            <FormItem> <FormLabel>Empreendimentos Atribuídos</FormLabel> <FormControl> <MultiSelect options={empreendimentoOptions} selected={field.value || []} onChange={field.onChange} isLoading={isFetchingEmpreendimentos} disabled={isCreatingUser} placeholder="Selecione..." /> </FormControl> <FormMessage /> </FormItem>
                                         )} />
                                     )}
                                     <DialogFooter className="pt-4 sticky bottom-0 bg-background pb-4 -mb-4">
-                                        <Button variant="outline" type="button" onClick={() => setNewUserDialogOpen(false)} disabled={isSubmitting === 'newUser'}>Cancelar</Button>
-                                        <Button type="submit" disabled={isSubmitting === 'newUser' || isFetchingEmpreendimentos}>
-                                            {isSubmitting === 'newUser' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Adicionar
+                                        <Button variant="outline" type="button" onClick={() => setNewUserDialogOpen(false)} disabled={isCreatingUser}>Cancelar</Button>
+                                        {/* Botão usa isCreatingUser e isFetchingEmpreendimentos */}
+                                        <Button type="submit" disabled={isCreatingUser || isFetchingEmpreendimentos}>
+                                            {isCreatingUser && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Adicionar
                                         </Button>
                                     </DialogFooter>
                                 </form>
@@ -286,16 +249,22 @@ export default function UserSettingsTable() {
                     </Dialog>
                 </CardHeader>
                 <CardContent>
-                    <div className="mb-4">
-                        <Input placeholder="Buscar por nome ou email..." value={userSearchTerm} onChange={(e) => setUserSearchTerm(e.target.value)} disabled={isLoading} />
+                    {/* --- Busca --- */}
+                    <div className="mb-4 flex items-center gap-2">
+                         <Search className="h-4 w-4 text-muted-foreground" />
+                         <Input placeholder="Buscar por nome ou email..." value={searchTerm} onChange={(e) => {setSearchTerm(e.target.value); setCurrentPage(1);}} disabled={isLoadingUsers} className="h-9 text-sm" />
                     </div>
-                    {isLoading ? (
-                        <div className="space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+                    {/* --- Tabela --- */}
+                    {/* Usa isLoadingUsers */}
+                    {isLoadingUsers && users.length === 0 ? ( // Mostra skeleton apenas no load inicial
+                        <div className="space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
                     ) : users.length === 0 ? (
-                        <p className="text-center text-muted-foreground py-6">Nenhum usuário encontrado.</p>
+                        <p className="text-center text-muted-foreground py-6">Nenhum usuário encontrado {searchTerm && `para "${searchTerm}"`}.</p>
                     ) : (
-                        <div className="border rounded-md overflow-x-auto">
-                            <Table>
+                        <div className="border rounded-md overflow-x-auto relative">
+                             {/* Overlay de Loading para refetch */}
+                             {isLoadingUsers && users.length > 0 && ( <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex items-center justify-center z-10"> <Loader2 className="h-6 w-6 animate-spin text-primary" /> </div> )}
+                             <Table>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Nome</TableHead>
@@ -307,34 +276,29 @@ export default function UserSettingsTable() {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
+                                    {/* Mapeia os dados de `usersQuery.data.users` */}
                                     {users.map((user) => {
-                                        const empreendimentosText = user.role === 'admin' || user.role === 'manager'
-                                            ? 'Todos'
-                                            : user.assignedEmpreendimentos && user.assignedEmpreendimentos.length > 0
-                                                ? user.assignedEmpreendimentos.map(emp => emp.name).join(', ')
-                                                : 'Nenhum';
-                                        const empreendimentosTitle = user.assignedEmpreendimentos && user.assignedEmpreendimentos.length > 0
-                                            ? user.assignedEmpreendimentos.map(emp => emp.name).join(', ')
-                                            : undefined;
+                                        // Lógica para exibir empreendimentos (sem alterações)
+                                        const empreendimentosText = user.role === 'admin' || user.role === 'manager' ? 'Todos' : user.assignedEmpreendimentos && user.assignedEmpreendimentos.length > 0 ? user.assignedEmpreendimentos.map(emp => emp.name).join(', ') : 'Nenhum';
+                                        const empreendimentosTitle = user.assignedEmpreendimentos && user.assignedEmpreendimentos.length > 0 ? user.assignedEmpreendimentos.map(emp => emp.name).join(', ') : undefined;
 
                                         return (
-                                            <TableRow key={user._id}>
+                                            <TableRow key={user._id} className={isActionSubmitting && userToModify?._id === user._id ? 'opacity-50' : ''}>
                                                 <TableCell className="font-medium">{user.name}</TableCell>
                                                 <TableCell>{user.email}</TableCell>
                                                 <TableCell><Badge variant={user.role === 'admin' ? 'default' : user.role === 'manager' ? 'secondary' : 'outline'}>{user.role}</Badge></TableCell>
-                                                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate" title={empreendimentosTitle}>
-                                                    {empreendimentosText}
-                                                </TableCell>
+                                                <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate" title={empreendimentosTitle}> {empreendimentosText} </TableCell>
                                                 <TableCell>{new Date(user.createdAt).toLocaleDateString('pt-BR')}</TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="flex justify-end gap-1">
-                                                        {session?.user?.id !== user._id && (
-                                                            <>
-                                                                <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(user)} disabled={!!isSubmitting}><Edit className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent><p>Editar</p></TooltipContent></Tooltip>
-                                                                <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openPasswordDialog(user)} disabled={!!isSubmitting}><KeyRound className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent><p>Senha</p></TooltipContent></Tooltip>
-                                                                <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => { setUserToModify(user); setDeleteUserDialogOpen(true); }} disabled={!!isSubmitting}><Trash2 className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent><p>Excluir</p></TooltipContent></Tooltip>
-                                                            </>
-                                                        )}
+                                                        {/* Desabilitar ações se outra ação estiver em progresso para QUALQUER usuário ou se esta linha específica estiver sendo modificada */}
+                                                         {session?.user?.id !== user._id && (
+                                                             <>
+                                                                <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(user)} disabled={isActionSubmitting}><Edit className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent><p>Editar</p></TooltipContent></Tooltip>
+                                                                <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openPasswordDialog(user)} disabled={isActionSubmitting}><KeyRound className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent><p>Senha</p></TooltipContent></Tooltip>
+                                                                <Tooltip><TooltipTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => openDeleteDialog(user)} disabled={isActionSubmitting}><Trash2 className="h-4 w-4" /></Button></TooltipTrigger><TooltipContent><p>Excluir</p></TooltipContent></Tooltip>
+                                                             </>
+                                                         )}
                                                         {session?.user?.id === user._id && (<span className="text-xs text-muted-foreground italic pr-2">(Você)</span>)}
                                                     </div>
                                                 </TableCell>
@@ -346,64 +310,73 @@ export default function UserSettingsTable() {
                         </div>
                     )}
 
+                    {/* --- Dialog Excluir Usuário --- */}
                     <Dialog open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
                         <DialogContent>
                             <DialogHeader><DialogTitle>Excluir Usuário</DialogTitle><DialogDescription>Tem certeza que deseja excluir <strong>{userToModify?.name}</strong>? Esta ação não pode ser desfeita.</DialogDescription></DialogHeader>
-                            <DialogFooter className="pt-4 gap-2"><Button variant="outline" onClick={() => setDeleteUserDialogOpen(false)} disabled={isSubmitting === `delete-${userToModify?._id}`}>Cancelar</Button><Button variant="destructive" onClick={handleDeleteUser} disabled={isSubmitting === `delete-${userToModify?._id}`}>{isSubmitting === `delete-${userToModify?._id}` && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Excluir</Button></DialogFooter>
+                            <DialogFooter className="pt-4 gap-2">
+                                <Button variant="outline" onClick={() => setDeleteUserDialogOpen(false)} disabled={isDeletingUser}>Cancelar</Button>
+                                <Button variant="destructive" onClick={handleDeleteUser} disabled={isDeletingUser}>
+                                    {isDeletingUser && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Excluir
+                                </Button>
+                            </DialogFooter>
                         </DialogContent>
                     </Dialog>
 
-                    <Dialog open={passwordChangeDialogOpen} onOpenChange={(open) => { if (!open) setUserToModify(null); setPasswordChangeDialogOpen(open); }}>
+                    {/* --- Dialog Alterar Senha --- */}
+                     <Dialog open={passwordChangeDialogOpen} onOpenChange={(open) => { if (!open) setUserToModify(null); setPasswordChangeDialogOpen(open); }}>
                         <DialogContent>
                             <DialogHeader><DialogTitle>Alterar Senha de {userToModify?.name}</DialogTitle><DialogDescription>Digite a nova senha para {userToModify?.email}.</DialogDescription></DialogHeader>
                             <FormProvider {...passwordChangeForm}>
                                 <form onSubmit={passwordChangeForm.handleSubmit(handleAdminPasswordChangeSubmit)} className="space-y-4 py-4">
-                                    <FormField control={passwordChangeForm.control} name="newPassword" render={({ field }) => (<FormItem><FormLabel>Nova Senha</FormLabel><div className="flex items-center gap-2"><FormControl><Input type={showPasswordFields ? "text" : "password"} {...field} disabled={!!isSubmitting} /></FormControl><Button type="button" variant="ghost" size="icon" onClick={() => setShowPasswordFields(!showPasswordFields)} className="flex-shrink-0">{showPasswordFields ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button></div><FormMessage /></FormItem>)} />
-                                    <FormField control={passwordChangeForm.control} name="confirmPassword" render={({ field }) => (<FormItem><FormLabel>Confirmar</FormLabel><FormControl><Input type={showPasswordFields ? "text" : "password"} {...field} disabled={!!isSubmitting} /></FormControl><FormMessage /></FormItem>)} />
-                                    <DialogFooter className="pt-4 gap-2"><DialogClose asChild><Button variant="outline" type="button" disabled={!!isSubmitting}>Cancelar</Button></DialogClose><Button type="submit" disabled={!!isSubmitting}>{!!isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar Senha</Button></DialogFooter>
+                                    <FormField control={passwordChangeForm.control} name="newPassword" render={({ field }) => (<FormItem><FormLabel>Nova Senha</FormLabel><div className="flex items-center gap-2"><FormControl><Input type={showPasswordFields ? "text" : "password"} {...field} disabled={isChangingPassword} /></FormControl><Button type="button" variant="ghost" size="icon" onClick={() => setShowPasswordFields(!showPasswordFields)} className="flex-shrink-0 h-8 w-8">{showPasswordFields ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button></div><FormMessage /></FormItem>)} />
+                                    <FormField control={passwordChangeForm.control} name="confirmPassword" render={({ field }) => (<FormItem><FormLabel>Confirmar</FormLabel><FormControl><Input type={showPasswordFields ? "text" : "password"} {...field} disabled={isChangingPassword} /></FormControl><FormMessage /></FormItem>)} />
+                                    <DialogFooter className="pt-4 gap-2">
+                                        <DialogClose asChild><Button variant="outline" type="button" disabled={isChangingPassword}>Cancelar</Button></DialogClose>
+                                        <Button type="submit" disabled={isChangingPassword}>
+                                            {isChangingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar Senha
+                                        </Button>
+                                    </DialogFooter>
                                 </form>
                             </FormProvider>
                         </DialogContent>
                     </Dialog>
 
-                    <Dialog open={editUserDialogOpen} onOpenChange={(open) => { if (!open) setUserToModify(null); setEditUserDialogOpen(open); }}>
+                    {/* --- Dialog Editar Usuário --- */}
+                     <Dialog open={editUserDialogOpen} onOpenChange={(open) => { if (!open) setUserToModify(null); setEditUserDialogOpen(open); }}>
                         <DialogContent className="sm:max-w-[500px]">
                             <DialogHeader><DialogTitle>Editar Usuário</DialogTitle><DialogDescription>Atualize as informações de {userToModify?.name}.</DialogDescription></DialogHeader>
                             <FormProvider {...editUserForm}>
                                 <form onSubmit={editUserForm.handleSubmit(handleEditUserSubmit)} className="space-y-4 py-4 max-h-[70vh] overflow-y-auto pr-2">
-                                    <FormField control={editUserForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Nome</FormLabel><FormControl><Input {...field} disabled={!!isSubmitting} /></FormControl><FormMessage /></FormItem>)} />
-                                    <FormField control={editUserForm.control} name="role" render={({ field }) => (
-                                        <FormItem><FormLabel>Função</FormLabel><Select onValueChange={field.onChange} value={field.value} disabled={!!isSubmitting}><FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="manager">Gerente</SelectItem><SelectItem value="user">Usuário</SelectItem></SelectContent></Select><FormMessage /></FormItem>
-                                    )} />
+                                    {/* Campos usam disabled={isEditingUser} */}
+                                     <FormField control={editUserForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Nome</FormLabel><FormControl><Input {...field} disabled={isEditingUser} /></FormControl><FormMessage /></FormItem>)} />
+                                     <FormField control={editUserForm.control} name="role" render={({ field }) => ( <FormItem><FormLabel>Função</FormLabel><Select onValueChange={field.onChange} value={field.value} disabled={isEditingUser}><FormControl><SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger></FormControl><SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="manager">Gerente</SelectItem><SelectItem value="user">Usuário</SelectItem></SelectContent></Select><FormMessage /></FormItem> )}/>
                                     {watchEditUserRole === 'user' && (
                                         <FormField control={editUserForm.control} name="assignedEmpreendimentos" render={({ field }) => (
-                                            <FormItem>
-                                                <FormLabel>Empreendimentos Atribuídos</FormLabel>
-                                                <FormControl>
-                                                    <MultiSelect
-                                                        options={allEmpreendimentos}
-                                                        selected={field.value || []}
-                                                        onChange={field.onChange}
-                                                        isLoading={isFetchingEmpreendimentos}
-                                                        disabled={!!isSubmitting}
-                                                        placeholder="Selecione..."
-                                                    />
-                                                </FormControl>
-                                                <FormMessage />
-                                            </FormItem>
+                                            <FormItem> <FormLabel>Empreendimentos Atribuídos</FormLabel> <FormControl> <MultiSelect options={empreendimentoOptions} selected={field.value || []} onChange={field.onChange} isLoading={isFetchingEmpreendimentos} disabled={isEditingUser || isFetchingEmpreendimentos} placeholder="Selecione..." /> </FormControl> <FormMessage /> </FormItem>
                                         )} />
                                     )}
-                                    <DialogFooter className="pt-4 sticky bottom-0 bg-background pb-4 -mb-4"><DialogClose asChild><Button variant="outline" type="button" disabled={!!isSubmitting}>Cancelar</Button></DialogClose><Button type="submit" disabled={!!isSubmitting || !editUserForm.formState.isDirty}>{!!isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar</Button></DialogFooter>
+                                    <DialogFooter className="pt-4 sticky bottom-0 bg-background pb-4 -mb-4">
+                                        <DialogClose asChild><Button variant="outline" type="button" disabled={isEditingUser}>Cancelar</Button></DialogClose>
+                                        {/* Botão usa isEditingUser */}
+                                        <Button type="submit" disabled={isEditingUser || isFetchingEmpreendimentos || !editUserForm.formState.isDirty}>
+                                            {isEditingUser && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Salvar
+                                        </Button>
+                                    </DialogFooter>
                                 </form>
                             </FormProvider>
                         </DialogContent>
                     </Dialog>
                 </CardContent>
-                {!isLoading && userPagination.totalPages > 1 && (
-                    <div className="flex items-center justify-between mt-4 px-6 pb-4">
-                        <span className="text-sm text-muted-foreground">Pág {userPagination.page} de {userPagination.totalPages}</span>
-                        <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => fetchUsersData(userPagination.page - 1, userPagination.limit, userSearchTerm)} disabled={userPagination.page === 1 || isLoading}>Anterior</Button><Button variant="outline" size="sm" onClick={() => fetchUsersData(userPagination.page + 1, userPagination.limit, userSearchTerm)} disabled={userPagination.page === userPagination.totalPages || isLoading}>Próxima</Button></div>
-                    </div>
+                {/* --- Paginação --- */}
+                 {/* Usa dados de paginação do tRPC query */}
+                 {!isLoadingUsers && pagination && pagination.pages > 1 && (
+                    <PaginationControls
+                        currentPage={pagination.page}
+                        totalPages={pagination.pages}
+                        onPageChange={setCurrentPage} // Atualiza a página local para refetch
+                        isDisabled={isLoadingUsers} // Desabilita durante o carregamento/fetch
+                     />
                 )}
             </Card>
         </TooltipProvider>

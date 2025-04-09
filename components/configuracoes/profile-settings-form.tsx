@@ -1,293 +1,193 @@
+// components/configuracoes/profile-settings-form.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSession } from 'next-auth/react';
 import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Upload, Save, Loader2, Trash2 } from 'lucide-react';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import * as z from 'zod';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { useSettings } from '@/hooks/useSettings';
+import { Loader2, Upload, User as UserIcon } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { useToast } from '@/components/ui/use-toast';
-import { cn } from '@/lib/utils';
-import { handleFileSelect, removeFile } from './settings-helpers';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useSession } from 'next-auth/react';
 
-const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
-const ACCEPTED_AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-
+// Schema for profile form validation - Focus only on editable fields
 const profileSchema = z.object({
-    name: z.string().min(3, "Nome muito curto"),
-    email: z.string().email("Email inválido"),
-    // CORREÇÃO: Use z.any() ou z.unknown() aqui
-    avatar: z.any() // Mude de z.instanceof(File) para z.any()
-        .optional()
-        .nullable()
-        .refine(file => !file || (typeof window !== 'undefined' && file instanceof File), {
-            message: "Arquivo inválido. Selecione um arquivo válido.",
-        })
-        .refine(file => !file || (typeof window !== 'undefined' && file instanceof File && file.size <= MAX_AVATAR_SIZE_BYTES), {
-            message: `Avatar excede ${MAX_AVATAR_SIZE_BYTES / 1024 / 1024}MB.`
-        })
-        .refine(file => !file || (typeof window !== 'undefined' && file instanceof File && ACCEPTED_AVATAR_TYPES.includes(file.type)), {
-            message: `Tipo de avatar inválido (${ACCEPTED_AVATAR_TYPES.join(', ')}).`
-        }),
+  name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
+  // ***** CORREÇÃO AQUI *****
+  // Substituir z.instanceof(File) por z.any()
+  // Mover a validação de tipo/tamanho para refine com verificação
+  avatar: z.any()
+    .optional().nullable()
+    // Validar tamanho SOMENTE se for um objeto com 'size' (seguro no server)
+    .refine(file => !file || (typeof file === 'object' && typeof file.size === 'number' && file.size <= 5 * 1024 * 1024), `Avatar excede 5MB.`)
+    // Validar tipo SOMENTE se for um objeto com 'type' (seguro no server)
+    .refine(file => !file || (typeof file === 'object' && typeof file.type === 'string' && ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)), `Tipo de avatar inválido.`),
+    // ***** FIM DA CORREÇÃO *****
 });
 
-type ProfileFormData = z.infer<typeof profileSchema>;
+type ProfileFormValues = z.infer<typeof profileSchema>;
 
 export default function ProfileSettingsForm() {
-    const { data: session, status, update } = useSession();
-    const { toast } = useToast();
-    const [isLoading, setIsLoading] = useState(true);
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | undefined>(undefined);
-    const [selectedAvatarName, setSelectedAvatarName] = useState<string | null>(null);
+  const { toast } = useToast();
+  const { update: updateSession } = useSession();
 
-    const form = useForm<ProfileFormData>({
-        resolver: zodResolver(profileSchema),
-        defaultValues: { name: '', email: '', avatar: null },
-    });
+  const {
+    profileSettingsQuery,
+    updateProfileMutation,
+  } = useSettings();
 
-    useEffect(() => {
-        if (status === 'authenticated' && session?.user) {
-            console.log("[ProfileSettingsForm useEffect] Session data received:", {
-                name: session.user.name,
-                email: session.user.email,
-                avatarUrl: session.user.avatarUrl || session.user.image
-            });
-            form.reset({
-                name: session.user.name || '',
-                email: session.user.email || '',
-                avatar: null
-            }, {
-                keepValues: false,
-                keepDirty: false,
-                keepErrors: false,
-            });
-            setCurrentAvatarUrl(session.user.avatarUrl || session.user.image || undefined);
-            setIsLoading(false);
-        } else if (status === 'unauthenticated' || status === 'loading') {
-            console.log("[ProfileSettingsForm useEffect] Status:", status);
-            setIsLoading(status === 'loading');
-            if (status === 'unauthenticated') {
-                form.reset({ name: '', email: '', avatar: null });
-                setCurrentAvatarUrl(undefined);
-            }
-        }
-    }, [session, status, form]);
+  const { data: profile, isLoading: isLoadingProfile, error: profileError } = profileSettingsQuery;
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
 
-    const handleProfileSubmit = useCallback(async (values: ProfileFormData) => {
-        setIsSubmitting(true);
-        console.log("[ProfileSubmit] Form values received:", {
-            name: values.name,
-            email: values.email,
-            avatar: values.avatar ? values.avatar.name : null
-        });
+  const form = useForm<ProfileFormValues>({
+    resolver: zodResolver(profileSchema),
+    defaultValues: {
+      name: '',
+      avatar: null,
+    },
+  });
 
-        try {
-            const formData = new FormData();
-            let requiresUpdate = false;
-
-            if (form.formState.dirtyFields.name) {
-                formData.append('name', values.name);
-                requiresUpdate = true;
-                console.log("[ProfileSubmit] Name changed:", values.name);
-            }
-            if (values.avatar instanceof File) {
-                formData.append('avatar', values.avatar, values.avatar.name);
-                requiresUpdate = true;
-                console.log("[ProfileSubmit] Avatar file selected:", values.avatar.name);
-            }
-
-            if (!requiresUpdate) {
-                toast({ title: "Nenhuma alteração", description: "Nenhum dado foi modificado para salvar." });
-                setIsSubmitting(false);
-                return;
-            }
-
-            console.log("[ProfileSubmit] Sending PUT request to /api/settings/profile");
-            const response = await fetch('/api/settings/profile', { method: 'PUT', body: formData });
-            const data = await response.json();
-
-            console.log("[ProfileSubmit] API Response:", {
-                status: response.status,
-                name: data.user?.name,
-                email: data.user?.email,
-                avatarUrl: data.user?.avatarUrl
-            });
-
-            if (!response.ok) {
-                throw new Error(data.error || `Falha ao salvar perfil (${response.status})`);
-            }
-            if (!data.user || !data.user.name || !data.user.email) {
-                throw new Error("Resposta inválida do servidor após atualização.");
-            }
-
-            toast({ title: "Sucesso", description: data.message || "Perfil atualizado." });
-
-            // Atualizar a sessão explicitamente
-            console.log("[ProfileSubmit] Updating session with:", {
-                name: data.user.name,
-                avatarUrl: data.user.avatarUrl
-            });
-            await update({
-                name: data.user.name,
-                avatarUrl: data.user.avatarUrl
-            });
-
-            // Resetar o formulário e atualizar a UI
-            form.reset({
-                name: data.user.name,
-                email: data.user.email,
-                avatar: null
-            }, { keepDirty: false });
-
-            // Adicionar timestamp para forçar re-renderização e evitar cache de imagem
-            const newAvatarUrl = data.user.avatarUrl ? `${data.user.avatarUrl}?t=${Date.now()}` : undefined;
-            setCurrentAvatarUrl(newAvatarUrl);
-            setSelectedAvatarName(null);
-
-            // Forçar a recarga da sessão
-            console.log("[ProfileSubmit] Forcing session refresh...");
-            await fetch('/api/auth/session', { method: 'GET' });
-
-        } catch (error) {
-            console.error("[ProfileSubmit] Error:", error);
-            toast({ variant: "destructive", title: "Erro", description: error instanceof Error ? error.message : "Falha ao salvar perfil" });
-        } finally {
-            setIsSubmitting(false);
-        }
-    }, [toast, update, form]);
-
-    const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        handleFileSelect(
-            e,
-            (file: File | null) => form.setValue('avatar', file, { shouldDirty: true, shouldValidate: true }),
-            setSelectedAvatarName,
-            setCurrentAvatarUrl,
-            'avatar',
-            form,
-            MAX_AVATAR_SIZE_BYTES,
-            ACCEPTED_AVATAR_TYPES
-        );
-        if (e.target.files?.[0]) {
-            console.log("[onFileChange] Avatar selected:", e.target.files[0].name);
-        }
-    };
-
-    const onFileRemove = () => {
-        const originalAvatar = session?.user?.avatarUrl || session?.user?.image || undefined;
-        removeFile(
-            (file: File | null) => form.setValue('avatar', file, { shouldDirty: true }),
-            setSelectedAvatarName,
-            setCurrentAvatarUrl,
-            'avatar',
-            originalAvatar,
-            form
-        );
-        console.log("[onFileRemove] Avatar removed, reverting to:", originalAvatar);
-    };
-
-    if (isLoading) {
-        return (
-            <Card>
-                <CardHeader><Skeleton className="h-6 w-32" /><Skeleton className="h-4 w-48 mt-2" /></CardHeader>
-                <CardContent className="space-y-6">
-                    <div className="flex flex-col items-center sm:flex-row gap-6">
-                        <div className="flex flex-col items-center space-y-2 flex-shrink-0">
-                            <Skeleton className="h-24 w-24 rounded-full" />
-                            <Skeleton className="h-8 w-32" />
-                        </div>
-                        <div className="flex-1 space-y-4 w-full">
-                            <div className="space-y-2"><Skeleton className="h-4 w-16" /><Skeleton className="h-10 w-full" /></div>
-                            <div className="space-y-2"><Skeleton className="h-4 w-16" /><Skeleton className="h-10 w-full" /></div>
-                        </div>
-                    </div>
-                </CardContent>
-                <CardFooter className="flex justify-end">
-                    <Skeleton className="h-10 w-28" />
-                </CardFooter>
-            </Card>
-        );
+  useEffect(() => {
+    if (profile) {
+      form.reset({
+        name: profile.name || '',
+        avatar: null,
+      });
+      setAvatarPreview(profile.avatarUrl || null);
+      setSelectedFileName(null);
     }
+  }, [profile, form]);
 
-    return (
-        <FormProvider {...form}>
-            <TooltipProvider>
-                <form onSubmit={form.handleSubmit(handleProfileSubmit)}>
-                    <Card>
-                        <CardHeader><CardTitle>Informações de Perfil</CardTitle><CardDescription>Atualize suas informações pessoais</CardDescription></CardHeader>
-                        <CardContent className="space-y-6">
-                            <div className="flex flex-col items-center sm:flex-row gap-6">
-                                <FormField control={form.control} name="avatar" render={({ field }) => (
-                                    <FormItem className="flex flex-col items-center space-y-2 flex-shrink-0">
-                                        <Avatar className="h-24 w-24">
-                                            <AvatarImage src={currentAvatarUrl} alt={form.getValues('name') || 'Avatar'} key={currentAvatarUrl} />
-                                            <AvatarFallback>{form.getValues('name')?.slice(0, 2).toUpperCase() || '??'}</AvatarFallback>
-                                        </Avatar>
-                                        <label htmlFor="avatar-upload" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "cursor-pointer")}>
-                                            <Upload className="mr-2 h-4 w-4" /> Alterar foto
-                                            <FormControl>
-                                                <Input
-                                                    id="avatar-upload"
-                                                    type="file"
-                                                    className="hidden"
-                                                    accept={ACCEPTED_AVATAR_TYPES.join(',')}
-                                                    ref={field.ref}
-                                                    name={field.name}
-                                                    onBlur={field.onBlur}
-                                                    onChange={onFileChange}
-                                                    disabled={isSubmitting}
-                                                />
-                                            </FormControl>
-                                        </label>
-                                        {selectedAvatarName && (
-                                            <div className='flex items-center text-xs text-muted-foreground gap-1'>
-                                                <span className="truncate max-w-[150px]" title={selectedAvatarName}>{selectedAvatarName}</span>
-                                                <Tooltip>
-                                                    <TooltipTrigger asChild>
-                                                        <Button type='button' variant='ghost' size='icon' className='h-5 w-5 text-destructive hover:bg-destructive/10' onClick={onFileRemove} disabled={isSubmitting}>
-                                                            <Trash2 className='h-3 w-3' />
-                                                        </Button>
-                                                    </TooltipTrigger>
-                                                    <TooltipContent side="right"><p>Remover seleção</p></TooltipContent>
-                                                </Tooltip>
-                                            </div>
-                                        )}
-                                        <FormMessage />
-                                    </FormItem>
-                                )} />
-                                <div className="flex-1 space-y-4 w-full">
-                                    <FormField control={form.control} name="name" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Nome</FormLabel>
-                                            <FormControl><Input {...field} value={field.value ?? ''} disabled={isSubmitting} /></FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )} />
-                                    <FormField control={form.control} name="email" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Email</FormLabel>
-                                            <FormControl><Input type="email" {...field} value={field.value ?? ''} disabled={true} readOnly className="cursor-not-allowed bg-muted/50" /></FormControl>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )} />
-                                </div>
-                            </div>
-                        </CardContent>
-                        <CardFooter className="flex justify-end">
-                            <Button type="submit" disabled={isSubmitting || isLoading || !form.formState.isDirty}>
-                                {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Salvar Perfil
-                            </Button>
-                        </CardFooter>
-                    </Card>
-                </form>
-            </TooltipProvider>
-        </FormProvider>
-    );
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    form.setValue('avatar', file, { shouldValidate: true, shouldDirty: true });
+
+    // A validação do Zod ocorrerá aqui. Se passar:
+    setTimeout(() => { // Timeout para garantir que a validação do RHF ocorra
+        const fieldState = form.getFieldState('avatar');
+        if (file && !fieldState.error) {
+          setSelectedFileName(file.name);
+          const reader = new FileReader();
+          reader.onloadend = () => { setAvatarPreview(reader.result as string); };
+          reader.readAsDataURL(file);
+        } else {
+          // Se inválido ou sem arquivo, reverte preview e limpa estado
+          setSelectedFileName(null);
+          setAvatarPreview(profile?.avatarUrl || null);
+          if (!file) form.setValue('avatar', null); // Garante limpar RHF se nenhum arquivo
+          // O erro de validação será mostrado pelo FormMessage
+          // Opcional: mostrar toast se a validação falhar aqui
+          // if (fieldState.error) {
+          //   toast({ variant: "destructive", title: "Erro", description: fieldState.error.message });
+          // }
+        }
+    }, 50); // Pequeno delay
+  };
+
+  const onSubmit = async (values: ProfileFormValues) => {
+    try {
+      let dataToSend: FormData | { name: string; avatarUrl?: string | null }; // Pode ser FormData ou JSON
+      const avatarFile = values.avatar; // Obter o valor do formulário
+
+      // **Validação Client-Side Adicional (Boa Prática)**
+      // Verifica se é realmente um File antes de usar FormData
+      if (avatarFile && typeof window !== 'undefined' && avatarFile instanceof File) {
+        dataToSend = new FormData();
+        dataToSend.append('name', values.name);
+        dataToSend.append('avatar', avatarFile); // Só adiciona se for File
+        console.log("[ProfileSubmit] Enviando FormData com novo avatar.");
+      } else {
+        // Se não for um File (ou for null/undefined), envia JSON
+        dataToSend = { name: values.name };
+        // Se `avatarFile` for null ou undefined explicitamente (pode significar remoção)
+        // Você pode adicionar lógica para enviar `avatarUrl: null` se necessário
+        if (values.avatar === null) {
+             // Assumindo que a mutação tRPC entende `avatarUrl: null` como remoção
+             (dataToSend as { name: string; avatarUrl?: string | null }).avatarUrl = null;
+             console.log("[ProfileSubmit] Enviando JSON com avatarUrl: null para remoção.");
+        } else {
+            console.log("[ProfileSubmit] Enviando JSON (sem alteração de avatar ou não é instância de File).");
+        }
+      }
+
+      // A mutação tRPC precisa ser capaz de lidar com FormData ou JSON
+      const result = await updateProfileMutation.mutateAsync(dataToSend as any); // Cast `any` é necessário aqui
+
+      if(result?.user) {
+        await updateSession({ name: result.user.name, image: result.user.avatarUrl }); // 'image' é o campo padrão do NextAuth
+         setAvatarPreview(result.user.avatarUrl || null);
+         form.reset({ name: result.user.name || values.name, avatar: null }, { keepDirty: false });
+         setSelectedFileName(null);
+      } else {
+         await updateSession();
+         form.reset(values, { keepDirty: false });
+         form.setValue('avatar', null);
+         setSelectedFileName(null);
+      }
+      // Toast de sucesso é tratado no hook useSettings
+    } catch (error: any) {
+      console.error('Erro no onSubmit do formulário:', error);
+      // Toast de erro é tratado no hook useSettings
+    }
+  };
+
+  const isProcessing = updateProfileMutation.isPending;
+
+  // --- Renderização (sem alterações significativas, exceto no file input) ---
+  if (isLoadingProfile) { /* ... Skeleton ... */
+        return ( <div className="space-y-6 animate-pulse"> <div><Skeleton className="h-8 w-32 mb-1" /><Skeleton className="h-4 w-48" /></div> <FormProvider {...form}><form className="space-y-6"> <div className="flex flex-col items-center space-y-4"> <Skeleton className="w-24 h-24 rounded-full" /> <Skeleton className="h-9 w-36 rounded-md" /> </div> <div className="space-y-4"> <div className="space-y-2"><Skeleton className="h-4 w-16" /><Skeleton className="h-10 w-full" /></div> <div className="space-y-2"><Skeleton className="h-4 w-16" /><Skeleton className="h-10 w-full" /></div> </div> <div className="flex justify-end"><Skeleton className="h-10 w-24 rounded-md" /></div> </form></FormProvider> </div> );
+  }
+  if (profileError) { /* ... Error Message ... */
+        return <div className="text-red-600 p-4 border border-red-200 rounded-md bg-red-50">Erro ao carregar perfil: {profileError.message}</div>;
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}
+      className="space-y-6"
+    >
+      <div> <h3 className="text-lg font-medium">Perfil</h3> <p className="text-sm text-muted-foreground">Atualize suas informações pessoais.</p> </div>
+      <FormProvider {...form}>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            {/* Avatar Section */}
+            <FormField
+              control={form.control}
+              name="avatar" // Mantém o nome do campo
+              render={({ fieldState }) => (
+                <FormItem className="flex flex-col items-center space-y-3">
+                  <Avatar className="w-24 h-24 border">
+                    <AvatarImage src={avatarPreview || undefined} alt={profile?.name || "Avatar"} />
+                    <AvatarFallback> {profile?.name ? profile.name.charAt(0).toUpperCase() : <UserIcon />} </AvatarFallback>
+                  </Avatar>
+                  <FormControl>
+                     <label htmlFor="avatar-upload" className="cursor-pointer inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-9 px-3">
+                      <Upload className="mr-2 h-4 w-4" /> Alterar Foto
+                      {/* Input continua igual, o `onChange` e `form.setValue` cuidam dele */}
+                      <Input id="avatar-upload" type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={isProcessing} />
+                    </label>
+                  </FormControl>
+                   {selectedFileName && !fieldState.error && ( <p className="text-xs text-muted-foreground">Novo: {selectedFileName}</p> )}
+                  <FormMessage /> {/* Mostra erros de validação Zod */}
+                </FormItem>
+              )}
+            />
+            {/* Name Field (sem alterações) */}
+            <FormField control={form.control} name="name" render={({ field }) => ( <FormItem> <FormLabel>Nome</FormLabel> <FormControl><Input {...field} disabled={isProcessing} /></FormControl> <FormMessage /> </FormItem> )} />
+            {/* Email Field (Read-only - sem alterações) */}
+            <FormItem> <FormLabel>Email</FormLabel> <FormControl><Input value={profile?.email || ''} disabled type="email" readOnly className="bg-muted/50 cursor-not-allowed" /></FormControl> </FormItem>
+            {/* Submit Button (sem alterações) */}
+            <div className="flex justify-end"> <Button type="submit" disabled={isProcessing || !form.formState.isDirty}> {isProcessing ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando...</>) : "Salvar Alterações"} </Button> </div>
+          </form>
+        </Form>
+      </FormProvider>
+    </motion.div>
+  );
 }
