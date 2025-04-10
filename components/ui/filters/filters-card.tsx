@@ -1,7 +1,7 @@
-// components/ui/filters/filters-card.tsx
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2, RotateCcw } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface FiltersCardProps {
   title?: string;
@@ -19,16 +19,17 @@ export function FiltersCard({
   className,
 }: FiltersCardProps) {
   return (
-    <Card className={className}>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle>{title}</CardTitle>
+    <Card className={cn("w-full", className)}>
+      <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <CardTitle className="text-lg sm:text-xl font-semibold">{title}</CardTitle>
           {onReset && (
             <Button
               variant="ghost"
               size="sm"
               onClick={onReset}
               disabled={isLoading}
+              className="w-full sm:w-auto"
             >
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -42,8 +43,8 @@ export function FiltersCard({
           )}
         </div>
       </CardHeader>
-      <CardContent>
-        <div className={isLoading ? "opacity-70 pointer-events-none" : ""}>
+      <CardContent className="px-4 pb-4 sm:px-6 sm:pb-6">
+        <div className={cn("transition-opacity duration-200", isLoading && "opacity-70 pointer-events-none")}>
           {children}
         </div>
       </CardContent>
