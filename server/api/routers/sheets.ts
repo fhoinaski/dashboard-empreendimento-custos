@@ -1,41 +1,49 @@
-import { router, adminProcedure } from '../trpc'; // Use adminProcedure for creation
+// ============================================================
+// START OF REFACTORED FILE: server/api/routers/sheets.ts
+// (Fixed: Replaced adminProcedure with tenantAdminProcedure and added tenant check)
+// ============================================================
+import { router, tenantAdminProcedure } from '../trpc'; // <-- CORRIGIDO: Usa tenantAdminProcedure
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { createSheetSchema } from '../schemas/sheets'; // Import schema
-import { createEmpreendimentoSheet } from '@/lib/google/sheets';
+import { createEmpreendimentoSheet } from '@/lib/google/sheets'; // Import da lib
 import connectToDatabase from '@/lib/db/mongodb'; // Import DB connection
 import { Empreendimento } from '@/lib/db/models'; // Import Empreendimento model
-import mongoose from 'mongoose';
+import mongoose, { Types } from 'mongoose'; // Import Types
+import type { Context } from '../context'; // Import Context
 
-/**
- * Roteador para Google Sheets
- * Gerencia rotas relacionadas à integração com Google Sheets
- */
 export const sheetsRouter = router({
-  // Criar planilha para empreendimento (Equivalente a POST /api/sheets/create)
-  createEmpreendimentoSheet: adminProcedure
-    .input(createSheetSchema) // Use schema with empreendimentoId and empreendimentoName
-    .mutation(async ({ input, ctx }) => { // ctx is available
-      console.log("[tRPC sheets.createEmpreendimentoSheet] Input:", input);
+  // Criar planilha para empreendimento (Restrito a Tenant Admin)
+  createEmpreendimentoSheet: tenantAdminProcedure // <-- CORRIGIDO: Usa tenantAdminProcedure
+    .input(createSheetSchema)
+    .mutation(async ({ input, ctx }) => { // ctx agora tem tenantId e user garantidos
+      console.log(`[tRPC sheets.createEmpreendimentoSheet] Tenant: ${ctx.tenantId!}, Input:`, input);
+      const tenantObjectId = new Types.ObjectId(ctx.tenantId!); // Garante ObjectId
+
       try {
-        // 1. Validate Empreendimento and check if sheet exists
+        // 1. Valida Empreendimento DENTRO do tenant e verifica se já tem planilha
         await connectToDatabase();
-        const empreendimento = await Empreendimento.findById(input.empreendimentoId);
+        const empreendimento = await Empreendimento.findOne({
+            _id: new Types.ObjectId(input.empreendimentoId),
+            tenantId: tenantObjectId // <-- Garante que pertence ao tenant
+        });
+
         if (!empreendimento) {
-            console.error(`[tRPC sheets.createEmpreendimentoSheet] Empreendimento não encontrado: ${input.empreendimentoId}`);
-            throw new TRPCError({ code: 'NOT_FOUND', message: 'Empreendimento não encontrado' });
+            console.error(`[tRPC sheets.createEmpreendimentoSheet] Empreendimento ${input.empreendimentoId} não encontrado no tenant ${ctx.tenantId!}`);
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'Empreendimento não encontrado neste tenant' });
         }
         if (empreendimento.sheetId) {
              console.warn(`[tRPC sheets.createEmpreendimentoSheet] Empreendimento ${input.empreendimentoId} já possui planilha: ${empreendimento.sheetId}`);
-             // Consider returning existing sheet info instead of error?
-             // For now, throwing error to match previous logic.
              throw new TRPCError({ code: 'BAD_REQUEST', message: 'Empreendimento já possui uma planilha associada.' });
         }
-         // Ensure the name passed matches the one in the DB for consistency? Or use input name? Using input name.
-         console.log(`[tRPC sheets.createEmpreendimentoSheet] Chamando lib createEmpreendimentoSheet para: ${empreendimento.name}`);
-         // 2. Call the library function to create the sheet
-         const result = await createEmpreendimentoSheet(input.empreendimentoId, empreendimento.name);
-        console.log("[tRPC sheets.createEmpreendimentoSheet] Resultado da lib:", result);
+
+         // Usa o nome do empreendimento do banco de dados para consistência
+         const empreendimentoNameFromDB = empreendimento.name;
+         console.log(`[tRPC sheets.createEmpreendimentoSheet] Chamando lib createEmpreendimentoSheet para: ${empreendimentoNameFromDB}`);
+
+         // 2. Chama a função da biblioteca para criar a planilha (passa tenantId)
+         const result = await createEmpreendimentoSheet(tenantObjectId, input.empreendimentoId, empreendimentoNameFromDB);
+         console.log("[tRPC sheets.createEmpreendimentoSheet] Resultado da lib:", result);
 
         if (!result.success || !result.spreadsheetId) {
            console.error(`[tRPC sheets.createEmpreendimentoSheet] Erro na lib createEmpreendimentoSheet: ${result.error}`);
@@ -45,15 +53,19 @@ export const sheetsRouter = router({
           });
         }
 
-        // 3. Update the Empreendimento document with the new sheet ID
+        // 3. Atualiza o documento Empreendimento com o novo sheet ID
          console.log(`[tRPC sheets.createEmpreendimentoSheet] Atualizando empreendimento ${input.empreendimentoId} com sheetId ${result.spreadsheetId}...`);
-        await Empreendimento.findByIdAndUpdate(input.empreendimentoId, { sheetId: result.spreadsheetId });
+         await Empreendimento.updateOne(
+             { _id: empreendimento._id, tenantId: tenantObjectId }, // Confirma o filtro novamente
+             { $set: { sheetId: result.spreadsheetId, updatedAt: new Date() } }
+         );
          console.log("[tRPC sheets.createEmpreendimentoSheet] Empreendimento atualizado no DB.");
 
+        // 4. Retorna sucesso
         return {
           success: true,
           sheetId: result.spreadsheetId,
-          url: result.url, // Include the URL if returned by the lib function
+          url: result.url,
           message: 'Planilha criada e associada ao empreendimento com sucesso.',
         };
       } catch (error) {
@@ -69,3 +81,6 @@ export const sheetsRouter = router({
 });
 
 export type SheetsRouter = typeof sheetsRouter;
+// ============================================================
+// END OF REFACTORED FILE: server/api/routers/sheets.ts
+// ============================================================

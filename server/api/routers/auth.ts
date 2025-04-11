@@ -1,7 +1,10 @@
-
-import { router, publicProcedure, protectedProcedure, adminProcedure } from '../trpc'; // Use adminProcedure for register
+// ============================================================
+// START OF REFACTORED FILE: server/api/routers/auth.ts
+// (Fixed: Replaced adminProcedure with tenantAdminProcedure and use ctx.tenantId)
+// ============================================================
+import { router, publicProcedure, protectedProcedure, tenantAdminProcedure } from '../trpc'; // <-- Alterado: Usa tenantAdminProcedure
 import { TRPCError } from '@trpc/server';
-import { loginSchema, createUserSchema } from '../schemas/auth';
+import { loginSchema, createUserSchema, userResponseSchema } from '../schemas/auth'; // Added userResponseSchema
 import { hash, compare } from 'bcryptjs';
 import { User, Empreendimento } from '@/lib/db/models';
 import connectToDatabase from '@/lib/db/mongodb';
@@ -12,35 +15,37 @@ import mongoose, { Types } from 'mongoose'; // Import Types
  * Gerencia rotas relacionadas à autenticação e registro de usuários
  */
 export const authRouter = router({
-  // Procedimento para registro de novos usuários (Admin only)
-  // Equivalente a: POST /api/auth/register
-  register: adminProcedure // <-- Alterado para adminProcedure
+  // Procedimento para registro de novos usuários (Tenant Admin only)
+  register: tenantAdminProcedure // <-- CORRIGIDO: Usar tenantAdminProcedure
     .input(createUserSchema) // Usa o schema validado
-    .mutation(async ({ input, ctx }) => { // ctx agora está disponível
-      console.log("[tRPC auth.register] Iniciando registro. Input:", input);
+    .mutation(async ({ input, ctx }) => { // ctx agora inclui tenantId garantido
+      console.log(`[tRPC auth.register] Iniciando registro por Admin ${ctx.user!.id} no Tenant ${ctx.tenantId}. Input:`, input);
+      if (!ctx.tenantId) throw new TRPCError({ code: 'BAD_REQUEST', message: 'TenantId is required' });
+      const adminTenantId = new Types.ObjectId(ctx.tenantId); // Obtém o ObjectId do tenant do admin
+
       try {
         await connectToDatabase();
         console.log("[tRPC auth.register] DB Conectado.");
 
-        // Verificar se o email já existe
-        const existingUser = await User.findOne({ email: input.email });
+        // Verificar se o email já existe NO MESMO TENANT
+        const existingUser = await User.findOne({ email: input.email, tenantId: adminTenantId }); // <-- Adicionado filtro tenantId
         if (existingUser) {
-           console.warn(`[tRPC auth.register] Email já existe: ${input.email}`);
+           console.warn(`[tRPC auth.register] Email ${input.email} já existe no tenant ${adminTenantId}`);
           throw new TRPCError({
             code: 'CONFLICT',
-            message: 'Email já cadastrado',
+            message: 'Email já cadastrado neste tenant.',
           });
         }
-        console.log(`[tRPC auth.register] Email disponível: ${input.email}`);
+        console.log(`[tRPC auth.register] Email ${input.email} disponível no tenant ${adminTenantId}.`);
 
         // Hash da senha
-         console.log("[tRPC auth.register] Hashing password...");
-        const hashedPassword = await hash(input.password, 12); // Usar 12 rounds
+        console.log("[tRPC auth.register] Hashing password...");
+        const hashedPassword = await hash(input.password, 12);
 
-        // Validar e converter IDs de empreendimento
+        // Validar e converter IDs de empreendimento DENTRO DO TENANT DO ADMIN
         let assignedEmpreendimentoObjectIds: Types.ObjectId[] = [];
         if (input.role === 'user' && input.assignedEmpreendimentos?.length) {
-             console.log("[tRPC auth.register] Validando empreendimentos para usuário:", input.assignedEmpreendimentos);
+             console.log(`[tRPC auth.register] Validando empreendimentos [${input.assignedEmpreendimentos.join(',')}] para tenant ${adminTenantId}...`);
             const validIds = input.assignedEmpreendimentos.every(id => mongoose.isValidObjectId(id));
             if (!validIds) {
                  console.error("[tRPC auth.register] IDs de empreendimento inválidos recebidos.");
@@ -48,55 +53,64 @@ export const authRouter = router({
             }
             assignedEmpreendimentoObjectIds = input.assignedEmpreendimentos.map(id => new Types.ObjectId(id));
 
-            // Verificar se empreendimentos existem
-             console.log("[tRPC auth.register] Verificando existência dos empreendimentos...");
-            const existingCount = await Empreendimento.countDocuments({ _id: { $in: assignedEmpreendimentoObjectIds } });
-            if (existingCount !== assignedEmpreendimentoObjectIds.length) {
-                console.error("[tRPC auth.register] Um ou mais empreendimentos atribuídos não existem.");
-                throw new TRPCError({ code: 'BAD_REQUEST', message: 'Um ou mais empreendimentos atribuídos não existem.' });
+            // Verificar se empreendimentos existem E PERTENCEM AO TENANT DO ADMIN
+             console.log("[tRPC auth.register] Verificando existência e posse dos empreendimentos...");
+             // *** CORREÇÃO: Adicionar filtro de tenantId na busca de empreendimentos ***
+            const existingEmpreendimentos = await Empreendimento.find({
+                 _id: { $in: assignedEmpreendimentoObjectIds },
+                 tenantId: adminTenantId // <-- Garante que pertencem ao tenant
+            }).select('_id').lean();
+
+            if (existingEmpreendimentos.length !== assignedEmpreendimentoObjectIds.length) {
+                console.error(`[tRPC auth.register] Um ou mais empreendimentos não existem ou não pertencem ao tenant ${adminTenantId}.`);
+                throw new TRPCError({ code: 'BAD_REQUEST', message: 'Um ou mais empreendimentos atribuídos não existem ou não pertencem a este tenant.' });
             }
-            console.log("[tRPC auth.register] Empreendimentos validados.");
+            console.log("[tRPC auth.register] Empreendimentos validados com sucesso.");
         }
 
-        // Criar novo usuário com dados validados
+        // Criar novo usuário com dados validados e tenantId do admin
         const userData: any = { // Use 'any' temporarily or define a more precise creation type
+            tenantId: adminTenantId, // <-- Adiciona o tenantId do admin
             name: input.name,
             email: input.email,
             password: hashedPassword,
-            role: input.role,
+            role: input.role, // Garante que a role passada seja usada (admin, manager, user)
             assignedEmpreendimentos: input.role === 'user' ? assignedEmpreendimentoObjectIds : [], // Limpa para admin/manager
             // Adiciona preferências padrão
             notificationPreferences: {
-                emailDespesasVencer: true,
-                emailDocumentosNovos: true,
-                emailRelatoriosSemanais: false,
-                systemDespesasVencer: true,
-                systemDocumentosNovos: true,
-                systemEventosCalendario: true,
+                emailDespesasVencer: true, emailDocumentosNovos: true, emailRelatoriosSemanais: false,
+                systemDespesasVencer: true, systemDocumentosNovos: true, systemEventosCalendario: true,
                 antecedenciaVencimento: 3,
             },
-            preferences: {
-                language: 'pt-BR',
-                dateFormat: 'dd/MM/yyyy',
-                currency: 'BRL',
-            },
-            // createdAt e updatedAt são gerenciados pelo Mongoose { timestamps: true }
+            preferences: { language: 'pt-BR', dateFormat: 'dd/MM/yyyy', currency: 'BRL' },
         };
 
         console.log("[tRPC auth.register] Criando usuário com dados:", JSON.stringify(userData, null, 2));
         const newUser = await User.create(userData);
-        console.log(`[tRPC auth.register] Usuário criado com ID: ${newUser._id}`);
+        console.log(`[tRPC auth.register] Usuário criado com ID: ${newUser._id} no Tenant ${newUser.tenantId}`);
+
+        // Buscar nomes dos empreendimentos atribuídos para a resposta
+        let assignedEmpreendimentosResp: { _id: string; name: string; }[] = [];
+        if (newUser.assignedEmpreendimentos && newUser.assignedEmpreendimentos.length > 0) {
+            const empDocs = await Empreendimento.find({ _id: { $in: newUser.assignedEmpreendimentos } }).select('_id name').lean();
+            assignedEmpreendimentosResp = empDocs.map(e => ({ _id: e._id.toString(), name: e.name }));
+        }
 
         return {
           success: true,
           message: 'Usuário criado com sucesso',
-          user: { // Retorna dados seguros
-            id: newUser._id.toString(),
+          user: userResponseSchema.parse({ // Validar a resposta
+            _id: newUser._id.toString(),
             name: newUser.name,
             email: newUser.email,
             role: newUser.role,
-            assignedEmpreendimentos: newUser.assignedEmpreendimentos?.map(id => id.toString()) || [],
-          },
+            avatarUrl: newUser.avatarUrl ?? null,
+            notificationPreferences: newUser.notificationPreferences,
+            preferences: newUser.preferences,
+            assignedEmpreendimentos: assignedEmpreendimentosResp,
+            createdAt: newUser.createdAt.toISOString(),
+            updatedAt: newUser.updatedAt.toISOString(),
+          }),
         };
       } catch (error) {
         if (error instanceof TRPCError) throw error;
@@ -111,61 +125,59 @@ export const authRouter = router({
     }),
 
   // Procedimento para verificar credenciais (usado internamente pelo NextAuth `authorize`)
-  // Não é chamado diretamente pelo cliente via tRPC para login.
-  // O login real acontece via POST para /api/auth/callback/credentials
-  verifyCredentials: publicProcedure // Deve ser público para NextAuth usar
+  // Mantido como publicProcedure
+  verifyCredentials: publicProcedure
     .input(loginSchema)
-    .query(async ({ input }) => { // Query é mais apropriado aqui, não muda o estado
+    .query(async ({ input }) => {
        // console.log(`[tRPC verifyCredentials] Verificando: ${input.email}`);
       try {
         await connectToDatabase();
-
-        // Buscar usuário pelo email
-        const user = await User.findOne({ email: input.email }).lean(); // Use lean for performance
-        if (!user) {
-          // console.warn(`[tRPC verifyCredentials] Usuário não encontrado: ${input.email}`);
-          throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Credenciais inválidas' });
-        }
-        if (!user.password) {
-           // console.warn(`[tRPC verifyCredentials] Usuário sem senha: ${input.email}`);
-           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Conta inválida' });
-        }
-
-        // Verificar senha
+        const user = await User.findOne({ email: input.email }).lean();
+        if (!user) throw new Error('Credenciais inválidas'); // Erro genérico
+        if (!user.password) throw new Error('Conta inválida'); // Erro genérico
         const passwordValid = await compare(input.password, user.password);
-        if (!passwordValid) {
-           // console.warn(`[tRPC verifyCredentials] Senha inválida para: ${input.email}`);
-           throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Credenciais inválidas' });
-        }
+        if (!passwordValid) throw new Error('Credenciais inválidas'); // Erro genérico
 
+        // *** Superadmin Check: Precisa ter role 'superadmin' E tenantId null/undefined ***
+        const isSuperAdmin = user.role === 'superadmin' && !user.tenantId;
+        // *** Non-Superadmin Check: Precisa ter tenantId E ser um ObjectId válido ***
+        const isValidTenantUser = !isSuperAdmin && user.tenantId && mongoose.isValidObjectId(user.tenantId);
+
+        if (!isSuperAdmin && !isValidTenantUser) {
+             console.error(`[tRPC verifyCredentials] Configuração inválida para usuário ${user.email}. Role: ${user.role}, TenantId: ${user.tenantId}`);
+             throw new Error('Configuração de conta inválida.');
+        }
         // console.log(`[tRPC verifyCredentials] Credenciais OK para: ${input.email}`);
-        // Retorna os dados necessários para a sessão NextAuth
+
         return {
           id: user._id.toString(),
           name: user.name,
           email: user.email,
           role: user.role,
+          // *** Garante tenantId: null para superadmin no retorno ***
+          tenantId: isSuperAdmin ? null : user.tenantId?.toString() ?? null,
           avatarUrl: user.avatarUrl,
           assignedEmpreendimentos: user.assignedEmpreendimentos?.map(id => id.toString()) || [],
         };
       } catch (error) {
-        // Não relança TRPCError aqui para evitar expor detalhes no authorize
         console.error('[tRPC verifyCredentials] Erro:', error);
-        throw new Error('Falha na verificação de credenciais'); // Lança erro genérico para NextAuth
+        // Lança erro genérico para o `authorize` do NextAuth capturar
+        throw new Error(error instanceof Error ? error.message : 'Falha na verificação');
       }
     }),
 
   // Procedimento para obter dados do usuário logado atualmente
-  me: protectedProcedure // Requer autenticação
+  // Mantido como protectedProcedure
+  me: protectedProcedure
     .query(async ({ ctx }) => {
       console.log(`[tRPC auth.me] Buscando dados para usuário ID: ${ctx.user.id}`);
       try {
         await connectToDatabase();
-        // ctx.user é populado pelo middleware isAuthenticated
         const userId = ctx.user.id;
         const user = await User.findById(userId)
-          .select('-password') // Exclui a senha
-          .lean(); // Use lean
+          .select('-password')
+          .populate<{ assignedEmpreendimentos: { _id: Types.ObjectId; name: string }[] }>('assignedEmpreendimentos', '_id name') // Popula nomes
+          .lean();
 
         if (!user) {
            console.error(`[tRPC auth.me] Usuário não encontrado no DB: ${userId}`);
@@ -173,17 +185,22 @@ export const authRouter = router({
         }
         console.log(`[tRPC auth.me] Dados encontrados para: ${user.email}`);
 
-        // Retorna dados seguros do usuário logado
-        return {
-          id: user._id.toString(),
+        return userResponseSchema.parse({ // Validar resposta
+          _id: user._id.toString(),
           name: user.name,
           email: user.email,
           role: user.role,
-          avatarUrl: user.avatarUrl,
+          avatarUrl: user.avatarUrl ?? null,
           notificationPreferences: user.notificationPreferences,
           preferences: user.preferences,
-          assignedEmpreendimentos: user.assignedEmpreendimentos?.map(id => id.toString()) || [],
-        };
+          // Mapeia os documentos populados para o formato esperado
+          assignedEmpreendimentos: (user.assignedEmpreendimentos || []).map(emp => ({
+              _id: emp._id.toString(),
+              name: emp.name,
+          })),
+          createdAt: user.createdAt.toISOString(),
+          updatedAt: user.updatedAt.toISOString(),
+        });
       } catch (error) {
         if (error instanceof TRPCError) throw error;
         console.error('[tRPC auth.me] Erro:', error);
@@ -191,3 +208,7 @@ export const authRouter = router({
       }
     }),
 });
+
+// ============================================================
+// END OF REFACTORED FILE: server/api/routers/auth.ts
+// ============================================================

@@ -1,3 +1,6 @@
+// ============================================================
+// FILE: server/api/schemas/despesas.ts
+// ============================================================
 import { z } from 'zod';
 import mongoose from 'mongoose';
 
@@ -7,17 +10,17 @@ import mongoose from 'mongoose';
 
 // --- Enums ---
 export const despesaStatusSchema = z.enum(['Pago', 'Pendente', 'A vencer', 'Rejeitado'], {
-    errorMap: () => ({ message: "Status inválido" })
+  errorMap: () => ({ message: "Status inválido" })
 });
 export type DespesaStatus = z.infer<typeof despesaStatusSchema>;
 
 export const despesaCategorySchema = z.enum(['Material', 'Serviço', 'Equipamento', 'Taxas', 'Outros'], {
-    errorMap: () => ({ message: "Categoria inválida" })
+  errorMap: () => ({ message: "Categoria inválida" })
 });
 export type DespesaCategory = z.infer<typeof despesaCategorySchema>;
 
 export const despesaApprovalStatusSchema = z.enum(['Pendente', 'Aprovado', 'Rejeitado'], {
-    errorMap: () => ({ message: "Status de aprovação inválido" })
+  errorMap: () => ({ message: "Status de aprovação inválido" })
 });
 export type DespesaApprovalStatus = z.infer<typeof despesaApprovalStatusSchema>;
 
@@ -36,66 +39,83 @@ export type Attachment = z.infer<typeof attachmentSchema>;
 export const rawBaseDespesaSchema = z.object({
   description: z.string().trim().min(2, { message: 'A descrição deve ter pelo menos 2 caracteres' }),
   value: z.number().positive({ message: 'O valor deve ser positivo' }),
-  // Aceita ISO String ou Date
   date: z.string().datetime({ message: "Data inválida (ISO 8601)" }).or(z.date()),
   dueDate: z.string().datetime({ message: "Data de vencimento inválida (ISO 8601)" }).or(z.date()),
   category: despesaCategorySchema,
   empreendimento: z.string().refine((val) => mongoose.isValidObjectId(val), {
     message: "ID de empreendimento inválido",
   }),
-  paymentMethod: z.string().optional().nullable(),
-  notes: z.string().optional().nullable(),
+  paymentMethod: z.string().trim().optional().nullable(),
+  notes: z.string().trim().optional().nullable(),
 });
 
 export const baseDespesaSchema = rawBaseDespesaSchema.refine(data => {
-    try {
-        const dateObj = new Date(data.date);
-        const dueDateObj = new Date(data.dueDate);
-        return !isNaN(dateObj.getTime()) && !isNaN(dueDateObj.getTime()) && dueDateObj >= dateObj;
-    } catch { return false; }
+  try {
+    const dateObj = new Date(data.date);
+    const dueDateObj = new Date(data.dueDate);
+    return !isNaN(dateObj.getTime()) && !isNaN(dueDateObj.getTime()) && dueDateObj >= dateObj;
+  } catch {
+    return false;
+  }
 }, {
-    message: "A data de vencimento não pode ser anterior à data da despesa.",
-    path: ["dueDate"],
+  message: "A data de vencimento não pode ser anterior à data da despesa.",
+  path: ["dueDate"],
 });
 
+// Schema para Criar Despesa
 export const createDespesaSchema = rawBaseDespesaSchema.extend({
   status: z.enum(['Pago', 'Pendente', 'A vencer'], {
     errorMap: () => ({ message: "Status para criação deve ser 'Pago', 'Pendente' ou 'A vencer'" })
   }),
-  // Anexos são tratados separadamente
 }).refine(data => {
-    try {
-        const dateObj = new Date(data.date);
-        const dueDateObj = new Date(data.dueDate);
-        return !isNaN(dateObj.getTime()) && !isNaN(dueDateObj.getTime()) && dueDateObj >= dateObj;
-    } catch { return false; }
+  try {
+    const dateObj = new Date(data.date);
+    const dueDateObj = new Date(data.dueDate);
+    return !isNaN(dateObj.getTime()) && !isNaN(dueDateObj.getTime()) && dueDateObj >= dateObj;
+  } catch {
+    return false;
+  }
 }, {
-    message: "A data de vencimento não pode ser anterior à data da despesa.",
-    path: ["dueDate"],
+  message: "A data de vencimento não pode ser anterior à data da despesa.",
+  path: ["dueDate"],
 });
-  // Anexos são tratados separadamente
-
 export type CreateDespesaInput = z.infer<typeof createDespesaSchema>;
 
-// Schema para ATUALIZAR despesa
+// Schema para Atualizar Despesa
 export const updateDespesaSchema = rawBaseDespesaSchema.extend({
-    status: despesaStatusSchema.optional(), // Permite todos os status na atualização
-    // Handle attachments update (e.g., providing a new list or null to clear)
-    attachments: z.array(attachmentSchema).optional().nullable(),
-  })
-  .partial(); // Torna campos do base e extend opcionais
+  status: despesaStatusSchema.optional(),
+  attachments: z.array(attachmentSchema).optional().nullable(),
+}).partial();
 export type UpdateDespesaInput = z.infer<typeof updateDespesaSchema>;
 
-// Schema para REVISAR despesa
+// Schema para Revisar Despesa
 export const reviewDespesaSchema = z.object({
   approvalStatus: z.enum(['Aprovado', 'Rejeitado']),
   notes: z.string().optional(),
 });
 export type ReviewDespesaInput = z.infer<typeof reviewDespesaSchema>;
 
+// Schema para Filtros da Lista de Despesas (movido para cima para evitar TS2304)
+export const despesaFilterSchema = z.object({
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(15),
+  empreendimento: z.string().refine((val) => val === 'todos' || mongoose.isValidObjectId(val), {
+    message: "ID de empreendimento inválido",
+  }).optional(),
+  status: z.array(despesaStatusSchema).optional(),
+  category: despesaCategorySchema.optional(),
+  approvalStatus: despesaApprovalStatusSchema.optional(),
+  search: z.string().optional(),
+  startDate: z.string().datetime({ message: "Data inicial inválida (ISO 8601)" }).optional(),
+  endDate: z.string().datetime({ message: "Data final inválida (ISO 8601)" }).optional(),
+  sortBy: z.string().optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
+});
+export type DespesaFilterInput = z.infer<typeof despesaFilterSchema>;
+
 // --- Schemas de Output ---
 
-// Schema para resposta de despesa individual
+// Schema para Resposta de Despesa Individual
 export const despesaResponseSchema = z.object({
   _id: z.string(),
   description: z.string(),
@@ -126,96 +146,122 @@ export const despesaResponseSchema = z.object({
 });
 export type DespesaResponse = z.infer<typeof despesaResponseSchema>;
 
-// Schema para filtros da lista de despesas
-export const despesaFilterSchema = z.object({
-  page: z.number().int().min(1).default(1),
-  limit: z.number().int().min(1).max(100).default(15),
-  empreendimento: z.string().refine((val) => val === 'todos' || mongoose.isValidObjectId(val), {
-    message: "ID de empreendimento inválido",
-  }).optional(),
-  status: z.array(despesaStatusSchema).optional(),
-  category: despesaCategorySchema.optional(),
-  approvalStatus: despesaApprovalStatusSchema.optional(),
-  search: z.string().optional(),
-  startDate: z.string().datetime({ message: "Data inicial inválida (ISO 8601)" }).optional(),
-  endDate: z.string().datetime({ message: "Data final inválida (ISO 8601)" }).optional(),
-  sortBy: z.string().optional(),
-  sortOrder: z.enum(['asc', 'desc']).optional(),
-});
-export type DespesaFilterInput = z.infer<typeof despesaFilterSchema>;
-
-// Schema para resposta da lista de despesas
+// Schema para Resposta da Lista de Despesas
 export const despesaListResponseSchema = z.object({
-    despesas: z.array(despesaResponseSchema),
-    pagination: z.object({
-        total: z.number().int().min(0),
-        limit: z.number().int().positive(),
-        page: z.number().int().positive(),
-        pages: z.number().int().min(0),
-        hasMore: z.boolean(),
-    })
+  despesas: z.array(despesaResponseSchema),
+  pagination: z.object({
+    total: z.number().int().min(0),
+    limit: z.number().int().positive(),
+    page: z.number().int().positive(),
+    pages: z.number().int().min(0),
+    hasMore: z.boolean(),
+  })
 });
 export type DespesaListResponse = z.infer<typeof despesaListResponseSchema>;
 
-// Schema para resumo de despesas
+// Schema para Resumo de Despesas
 export const despesaSummarySchema = z.object({
   totalValue: z.number(),
   totalCount: z.number().int().min(0),
-  paidValue: z.number(), // Renomeado para clareza
-  dueValue: z.number(),   // Renomeado para clareza
-  // Removidos campos que não eram calculados de forma consistente
+  paidValue: z.number(),
+  dueValue: z.number(),
 });
 export type DespesaSummaryOutput = z.infer<typeof despesaSummarySchema>;
 
-// Schema para item de despesa pendente
+// Schema para Item de Despesa Pendente
 export const pendingApprovalItemSchema = z.object({
-    id: z.string(),
-    description: z.string(),
-    empreendimentoName: z.string(),
-    value: z.number(),
-    createdAt: z.string().datetime(),
+  id: z.string(),
+  description: z.string(),
+  empreendimentoName: z.string(),
+  value: z.number(),
+  createdAt: z.string().datetime(),
 });
-// Schema para resposta da lista de despesas pendentes
+
+// Schema para Resposta da Lista de Despesas Pendentes
 export const pendingApprovalsResponseSchema = z.object({
-    items: z.array(pendingApprovalItemSchema),
-    pagination: z.object({
-        total: z.number().int().min(0),
-        limit: z.number().int().positive(),
-        page: z.number().int().positive(),
-        pages: z.number().int().min(0),
-        hasMore: z.boolean(),
-    })
+  items: z.array(pendingApprovalItemSchema),
+  pagination: z.object({
+    total: z.number().int().min(0),
+    limit: z.number().int().positive(),
+    page: z.number().int().positive(),
+    pages: z.number().int().min(0),
+    hasMore: z.boolean(),
+  })
 });
 export type PendingApprovalsResponse = z.infer<typeof pendingApprovalsResponseSchema>;
 
-// Schema para item de próxima despesa
+// Schema para Item de Próxima Despesa
 export const upcomingExpenseItemSchema = z.object({
-    id: z.string(),
-    description: z.string(),
-    dueDate: z.string().datetime(),
-    value: z.number(),
+  id: z.string(),
+  description: z.string(),
+  dueDate: z.string().datetime(),
+  value: z.number(),
 });
-// Schema para resposta da lista de próximas despesas
+
+// Schema para Resposta da Lista de Próximas Despesas
 export const upcomingExpensesResponseSchema = z.object({
-    items: z.array(upcomingExpenseItemSchema),
-    // Adicionar paginação se necessário
+  items: z.array(upcomingExpenseItemSchema),
 });
 export type UpcomingExpensesResponse = z.infer<typeof upcomingExpensesResponseSchema>;
 
-// Schema para item de comparação de despesas
+// Schema para Item de Comparação de Despesas
 export const despesaComparisonItemSchema = z.object({
-    category: z.string(),
-    totalValue: z.number(),
-    count: z.number().int().min(0),
+  category: z.string(),
+  totalValue: z.number(),
+  count: z.number().int().min(0),
 });
 export const despesaComparisonResponseSchema = z.array(despesaComparisonItemSchema);
 export type DespesaComparisonResponse = z.infer<typeof despesaComparisonResponseSchema>;
 
-// Schema para item de resumo mensal
+// Schema para Item de Resumo Mensal
 export const monthlySummaryItemSchema = z.object({
-    nome: z.string(), // e.g., "Jan/24"
-    valor: z.number(),
-    // count: z.number().int().min(0), // Opcional
+  nome: z.string(),
+  valor: z.number(),
 });
 export const monthlySummaryResponseSchema = z.array(monthlySummaryItemSchema);
 export type MonthlySummaryResponse = z.infer<typeof monthlySummaryResponseSchema>;
+
+// --- Schemas de Filtro e Input Adicionais ---
+
+// Filtro Base para Relatórios
+export const relatorioBaseFilterSchema = z.object({
+  startDate: z.string().datetime({ message: "Data inicial inválida (ISO 8601)" }),
+  endDate: z.string().datetime({ message: "Data final inválida (ISO 8601)" }),
+  empreendimentoId: z.string().refine((val) => val === 'todos' || mongoose.isValidObjectId(val), {
+    message: "ID de empreendimento inválido",
+  }).optional(),
+});
+
+// Inputs Específicos
+export const getComparisonByCategoryInputSchema = relatorioBaseFilterSchema;
+export const getMonthlySummaryInputSchema = relatorioBaseFilterSchema;
+
+export const listPendingReviewInputSchema = z.object({
+  limit: z.number().int().min(1).max(20).default(5),
+  page: z.number().int().min(1).default(1),
+});
+
+export const getGeneralSummaryInputSchema = despesaFilterSchema.omit({
+  page: true,
+  limit: true,
+  sortBy: true,
+  sortOrder: true
+});
+
+export const listUpcomingDueInputSchema = z.object({
+  limit: z.number().int().min(1).max(20).default(5),
+  empreendimentoId: z.string().refine((val) => val === 'todos' || mongoose.isValidObjectId(val), {
+    message: "ID de empreendimento inválido",
+  }).optional(),
+});
+
+// --- Schema para Resposta da Mutação de Update ---
+export const updateDespesaResponseSchema = z.object({
+  id: z.string(),
+  description: z.string(),
+});
+export type UpdateDespesaResponse = z.infer<typeof updateDespesaResponseSchema>;
+
+// ============================================================
+// END OF FILE: server/api/schemas/despesas.ts
+// ============================================================

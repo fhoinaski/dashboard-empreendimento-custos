@@ -8,28 +8,55 @@ import ClientProviders from './ClientProviders';
 
 const inter = Inter({ subsets: ['latin'] });
 
+// --- METADATA OBJECT DEFINITION ---
 export const metadata: Metadata = {
-  title: 'Dashboard Imobiliário - Gestão de Empreendimentos',
-  description: 'Gerencie seus empreendimentos imobiliários e despesas de forma eficiente',
+  title: 'OrbiGestão - Plataforma de Gestão Multi-Serviços',
+  description: 'Centralize a gestão da sua empresa com o OrbiGestão. Controle obras, manutenção, financeiro e muito mais em uma plataforma eficiente e integrada.',
   manifest: '/manifest.json',
-  applicationName: 'Dashboard Imobiliário',
+  applicationName: 'OrbiGestão',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: 'Dashboard Imobiliário',
+    title: 'OrbiGestão',
+  },
+  themeColor: '#1D3557', // Azul Orbi Profundo da paleta sugerida
+  viewport: 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no',
+  icons: {
+    icon: '/icons/icon-512x512.png',
+    apple: '/icons/apple-icon.png',
+  },
+  openGraph: {
+    title: 'OrbiGestão - Plataforma de Gestão Multi-Serviços',
+    description: 'Otimize e simplifique a gestão da sua empresa com o OrbiGestão. Gestão integrada para múltiplos serviços e operações.',
+    url: 'https://orbigestao.com.br', // Atualize conforme seu domínio
+    siteName: 'OrbiGestão',
+    images: [
+      {
+        url: '/icons/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'OrbiGestão - Plataforma de Gestão Multi-Serviços',
+      },
+    ],
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'OrbiGestão - Plataforma de Gestão Multi-Serviços',
+    description: 'Gerencie sua operação de maneira eficiente com o OrbiGestão.',
+    images: ['/icons/og-image.png'],
   },
   formatDetection: {
     telephone: false,
-  },
-};
-
-// Função de utilidade movida para um arquivo separado
+  }
+}; 
 export const getBaseUrl = () => {
   if (typeof window !== 'undefined') return ''; // Navegador usa URL relativa
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return `http://localhost:${process.env.PORT ?? 3000}`;
 };
 
+// --- RootLayout COMPONENT DEFINITION ---
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -37,6 +64,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR" suppressHydrationWarning>
+      
       <head />
       <body className={inter.className}>
         <ClientProviders>

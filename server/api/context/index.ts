@@ -1,26 +1,33 @@
+// ============================================================
+// START OF REFACTORED FILE: server/api/context/index.ts (Multi-Tenancy)
+// ============================================================
 import { inferAsyncReturnType } from '@trpc/server';
 import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth/options';
+import { authOptions } from '@/lib/auth/options'; // authOptions já tipadas
 
 // Interface para o contexto do tRPC no App Router
 interface CreateContextOptions {
-  req: Request; // Apenas req é necessário no App Router com fetchRequestHandler
+  req: Request;
 }
 
 // Função para criar o contexto
 export async function createTRPCContext({ req }: CreateContextOptions) {
-  // Adaptar o req para o formato esperado pelo NextAuth no App Router
-  const session = await getServerSession({
-    req,
-    ...authOptions, // Espalha as opções de autenticação diretamente
-  });
+  // Session já está corretamente tipada via module augmentation em options.ts
+  const session = await getServerSession({ req, ...authOptions });
 
+  console.log("[tRPC Context] Session obtida:", session ? `User: ${session.user?.id}, Tenant: ${session.user?.tenantId}` : "Nenhuma");
+
+  // Retorna o contexto, incluindo tenantId
   return {
     req,
     session,
-    user: session?.user ?? null, // Inclui user para consistência com as rotas
+    user: session?.user ?? null,
+    tenantId: session?.user?.tenantId ?? null, // <-- Adicionado tenantId
   };
 }
 
 // Tipo do contexto inferido automaticamente
 export type Context = inferAsyncReturnType<typeof createTRPCContext>;
+// ============================================================
+// END OF REFACTORED FILE: server/api/context/index.ts
+// ============================================================
