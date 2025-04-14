@@ -15,6 +15,16 @@ body {
 @layer base {
   :root {
     --background: 0 0% 100%;
+    --background-color: #f8f8f8;
+    --text-color: #333;
+    --primary-color: #007bff;
+    --secondary-color: #6c757d;
+    --accent-color: #28a745;
+    --border-color: #dee2e6;
+    --error-color: #dc3545;
+    --warning-color: #ffc107;
+    --success-color: #28a745;
+
     --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 0 0% 3.9%;
@@ -51,6 +61,15 @@ body {
   .dark {
     --background: 0 0% 3.9%;
     --foreground: 0 0% 98%;
+    --background-color: #222;
+    --text-color: #eee;
+    --primary-color: #0056b3;
+    --secondary-color: #5a6268;
+    --accent-color: #218838;
+    --border-color: #495057;
+    --error-color: #c82333;
+    --warning-color: #e0a800;
+    --success-color: #218838;
     --card: 0 0% 3.9%;
     --card-foreground: 0 0% 98%;
     --popover: 0 0% 3.9%;

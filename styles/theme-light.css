@@ -1,0 +1,13 @@
+/* styles/theme-light.css */
+
+:root {
+  --background-color: #f8f8f8;
+  --text-color: #333;
+  --primary-color: #007bff;
+  --secondary-color: #6c757d;
+  --accent-color: #28a745;
+  --border-color: #dee2e6;
+  --error-color: #dc3545;
+  --warning-color: #ffc107;
+  --success-color: #28a745;
+}

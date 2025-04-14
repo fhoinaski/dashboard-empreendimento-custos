@@ -1,24 +1,46 @@
 "use client";
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTheme } from "next-themes"; // <-- Import directly
 import { Sun, Moon, Laptop } from "lucide-react";
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { cn } from "@/lib/utils";
+import { Switch } from '@/components/ui/switch';
 
 export default function AppearanceSettings() {
     // Use the hook directly from next-themes
     const { theme, setTheme } = useTheme();
+    const [isDark, setIsDark] = useState(false);
+
+    useEffect(() => {
+        if (theme === 'dark') {
+            setIsDark(true);
+        } else {
+            setIsDark(false);
+        }
+    }, [theme]);
+
+    const handleThemeChange = () => {
+        setIsDark(!isDark);
+        if (!isDark) {
+            setTheme('dark');
+        } else {
+            setTheme('light');
+        }
+    };
 
     return (
         <Card>
-            <CardHeader><CardTitle>Aparência</CardTitle><CardDescription>Personalize a aparência do sistema</CardDescription></CardHeader>
+            <CardHeader className="relative">
+                <CardTitle>Aparência</CardTitle>
+                <CardDescription>Personalize a aparência do sistema</CardDescription>
+                <Switch checked={isDark} onCheckedChange={handleThemeChange} className="absolute right-4 top-4" />
+            </CardHeader>
             <CardContent className="space-y-6">
-                <div>
                     <Label>Tema</Label>
                     <div className="grid grid-cols-3 gap-2 mt-2">
                         <Button variant="outline" onClick={() => setTheme('light')} className={cn(theme === 'light' && 'border-primary ring-1 ring-primary')}> <Sun className="mr-2 h-4 w-4" />Claro </Button>
@@ -26,8 +48,7 @@ export default function AppearanceSettings() {
                         <Button variant="outline" onClick={() => setTheme('system')} className={cn(theme === 'system' && 'border-primary ring-1 ring-primary')}> <Laptop className="mr-2 h-4 w-4" />Sistema </Button>
                     </div>
                 </div>
-                <Separator />
-                <div>
+            <Separator />
                     <h3 className="text-lg font-medium mb-3">Idioma e Região</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div className="space-y-1.5">
@@ -52,7 +73,6 @@ export default function AppearanceSettings() {
                             </Select>
                         </div>
                     </div>
-                </div>
             </CardContent>
         </Card>
     );

@@ -1,73 +1,78 @@
 "use client"; // Add 'use client'
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 // Import useTheme from next-themes to use internally
-import { ThemeProvider as NextThemesProvider, useTheme as useNextThemes, type ThemeProviderProps } from 'next-themes';
+import { ThemeProvider as NextThemesProvider, useTheme as useNextThemes, type ThemeProviderProps, Theme } from 'next-themes';
 
-type Theme = 'light' | 'dark' | 'system';
+type AppTheme = 'light' | 'dark' | 'system';
 
 interface ThemeContextType {
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
+    theme: AppTheme;
+    setTheme: (theme: AppTheme) => void;
+    applyTheme: (theme: AppTheme) => void; // New function to apply theme
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-// Internal hook to access next-themes context
-function useThemeInternal() {
-    // Directly use the hook from next-themes
-    const { theme, setTheme } = useNextThemes();
-    // Return the values, ensuring theme is compatible with our Theme type or defaults to 'system'
-    return {
-        // Cast the theme from next-themes (string | undefined) to our specific Theme type
-        currentNextTheme: (theme as Theme) ?? 'system',
-        setNextTheme: setTheme,
-    };
-}
-
-
 export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
-  // Get the actual theme and setter from next-themes
-  const { currentNextTheme, setNextTheme } = useThemeInternal();
+    // Get the actual theme and setter from next-themes
+    const { theme: currentNextTheme, setTheme: setNextTheme } = useNextThemes();
 
-  // Local state might still be useful if you need to track the *user's preference* separately
-  // from the *currently applied* theme (e.g., if 'system' is preferred but currently applies 'dark').
-  // Or, simplify and remove this if you only care about the applied theme.
-  const [preferredTheme, setPreferredTheme] = useState<Theme>(currentNextTheme);
+    // State to manage the preferred theme
+    const [preferredTheme, setPreferredTheme] = useState<AppTheme>(() => {
+        // Load preferred theme from localStorage on initialization
+        const storedTheme = localStorage.getItem('theme') as AppTheme;
+        return storedTheme || 'system';
+    });
 
-  // Update local preference when next-themes reports a change
-  useEffect(() => {
-      // FIX: Assert the type when setting the local state
-      setPreferredTheme(currentNextTheme as Theme);
-  }, [currentNextTheme]);
+    useEffect(() => {
+        // This effect synchronizes the preferred theme with the theme from next-themes
+        // and updates the localStorage whenever the preferred theme changes.
+        if (preferredTheme !== currentNextTheme && preferredTheme !== 'system') {
+            setNextTheme(preferredTheme as Theme)
+        }
+        
+        localStorage.setItem('theme', preferredTheme);
+    }, [preferredTheme]);
 
+    // Effect to apply the theme to the documentElement (<html>)
+    useEffect(() => {
+        applyTheme(preferredTheme);
+    }, [preferredTheme]);
 
-  // Function to set the theme using next-themes' setter
-  const setTheme = (newTheme: Theme) => {
-    setNextTheme(newTheme); // Tell next-themes to change the theme
-    // No need to update local state here, useEffect above handles it
-    // setPreferredTheme(newTheme);
-  };
+    // Function to set the theme and persist the change
+    const setTheme = (newTheme: AppTheme) => {
+        setPreferredTheme(newTheme);
+    };
 
-  // Value for your custom context uses the theme reported by next-themes
-  const value: ThemeContextType = {
-    theme: currentNextTheme, // Directly use the theme from next-themes
-    setTheme,
-  };
+     // Function to apply the theme to the documentElement (<html>)
+    const applyTheme = (theme: AppTheme) => {
+        const root = window.document.documentElement;
+        if (theme === 'dark') {
+            root.classList.add('dark');
+        } else {
+            root.classList.remove('dark');
+        }
+    };
 
-  // Render the NextThemesProvider which actually controls the theme
-  return (
-    <ThemeContext.Provider value={value}>
-      <NextThemesProvider
-        attribute="class"
-        defaultTheme="system"
-        enableSystem
-        {...props} // Pass through other props like storageKey etc.
-      >
-        {children}
-      </NextThemesProvider>
-    </ThemeContext.Provider>
-  );
+    const value: ThemeContextType = {
+        theme: preferredTheme,
+        setTheme,
+        applyTheme, // Expose the new applyTheme function
+    };
+
+    return (
+        <ThemeContext.Provider value={value}>
+            <NextThemesProvider
+                attribute="class"
+                defaultTheme="system"
+                enableSystem
+                {...props} // Pass through other props like storageKey etc.
+            >
+                {children}
+            </NextThemesProvider>
+        </ThemeContext.Provider>
+    );
 }
 
 // Your custom hook remains the same, consuming your custom context
@@ -77,4 +82,4 @@ export function useTheme() {
     throw new Error('useTheme must be used within a ThemeProvider');
   }
   return context;
-}
+}+}
