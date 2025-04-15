@@ -19,7 +19,7 @@ import type { PaginationInfo } from '@/lib/trpc/types'; // Importar tipo de pagi
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { useTenants } from '@/hooks/useTenants'; // Para ação de updateStatus
+import { useTenants } from '@/hooks/useOrganizacoes'; // Para ação de updateStatus
 
 interface TenantListTableProps {
     tenants: TenantListItem[];

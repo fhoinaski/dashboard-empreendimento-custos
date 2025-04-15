@@ -5,7 +5,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
-import { User, Bell, Building, Settings, Users, Laptop, Server, Lock, ShieldCheck, Globe } from "lucide-react"; // Added Globe
+import { User, Bell, Building, Settings, Users, Laptop, Server, Lock, ShieldCheck, Globe, Palette } from "lucide-react"; // Added Palette
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils"; // Import cn
@@ -14,24 +14,24 @@ import { cn } from "@/lib/utils"; // Import cn
 import ProfileSettingsForm from "./profile-settings-form";
 import PasswordSettingsForm from "./password-settings-form";
 import NotificationSettingsForm from "./notification-settings-form";
-import CompanySettingsForm from "./company-settings-form"; // Admin only (Global?)
-import UserSettingsTable from "./user-settings-table";     // Tenant Admin only
-import ApiKeysSettingsForm from "./api-keys-settings-form"; // Super Admin only (Global?)
-import BackupSettings from "./backup-settings";             // Super Admin only (Global?)
-import AppearanceSettings from "./appearance-settings";     // All roles
-// --- IMPORTAR NOVO FORM ---
+import CompanySettingsForm from "./company-settings-form";
+import UserSettingsTable from "./user-settings-table";
+import ApiKeysSettingsForm from "./api-keys-settings-form";
+import BackupSettings from "./backup-settings";
+import AppearanceSettings from "./appearance-settings";
 import GoogleIntegrationSettingsForm from "./GoogleIntegrationSettingsForm";
+import UiCustomizationSettings from "./UiCustomizationSettings"; // *** IMPORTAR O NOVO COMPONENTE ***
 
 export default function ConfiguracoesPage() {
     const { data: session, status } = useSession();
     const userRole = session?.user?.role;
     const isSuperAdmin = userRole === 'superadmin';
-    const isTenantAdmin = userRole === 'admin' && !!session?.user?.tenantId; // Check for tenantId explicitly
+    // Garante que isTenantAdmin seja true apenas se role for 'admin' E tiver tenantId
+    const isTenantAdmin = userRole === 'admin' && !!session?.user?.tenantId;
 
     const initialTab = "perfil";
     const [activeTab, setActiveTab] = useState(initialTab);
 
-    // Atualizar abas disponíveis
     const availableTabs = useMemo(() => {
         const allTabs = [
             // Common Tabs
@@ -40,31 +40,30 @@ export default function ConfiguracoesPage() {
             { value: "sistema", label: "Aparência", icon: Laptop, roles: ['superadmin', 'admin', 'manager', 'user'] },
 
             // Tenant Admin Tabs
-            { value: "usuarios", label: "Usuários", icon: Users, roles: ['admin'] }, // Tenant Admin
-             // --- ADICIONAR ABA GOOGLE ---
-            { value: "google", label: "Integrações", icon: Globe, roles: ['admin'] }, // Tenant Admin
+            { value: "usuarios", label: "Usuários", icon: Users, roles: ['admin'] }, // Apenas Tenant Admin
+            { value: "google", label: "Integrações", icon: Globe, roles: ['admin'] }, // Apenas Tenant Admin
+            { value: "uiCustomization", label: "Personalizar UI", icon: Palette, roles: ['admin'] }, // *** NOVA ABA (Apenas Tenant Admin) ***
 
             // Super Admin Tabs (Global Settings)
-            { value: "empresa", label: "Empresa (Global)", icon: Building, roles: ['superadmin'] },
-            { value: "apiKeys", label: "Chaves API (Global)", icon: ShieldCheck, roles: ['superadmin'] },
-            { value: "backup", label: "Backup (Global)", icon: Server, roles: ['superadmin'] },
-            // { value: "tenants", label: "Gerenciar Tenants", icon: Building2, roles: ['superadmin'] }, // Futuro
+            { value: "empresa", label: "Empresa (Global)", icon: Building, roles: ['superadmin'] }, // Apenas Super Admin
+            { value: "apiKeys", label: "Chaves API (Global)", icon: ShieldCheck, roles: ['superadmin'] }, // Apenas Super Admin
+            { value: "backup", label: "Backup (Global)", icon: Server, roles: ['superadmin'] }, // Apenas Super Admin
         ];
 
-        // Filtrar baseado na role E na presença de tenantId para admin
         return allTabs.filter(tab => {
-            if (!userRole) return false; // Não autenticado
+            if (!userRole) return false;
+            // Lógica ajustada para usar isSuperAdmin e isTenantAdmin
             if (tab.roles.includes('superadmin') && isSuperAdmin) return true;
-            if (tab.roles.includes('admin') && isTenantAdmin) return true; // Apenas admin COM tenantId
+            if (tab.roles.includes('admin') && isTenantAdmin) return true; // Somente Tenant Admin
             if (tab.roles.includes('manager') && userRole === 'manager') return true;
             if (tab.roles.includes('user') && userRole === 'user') return true;
             return false;
         });
 
-    }, [userRole, isSuperAdmin, isTenantAdmin]); // Depender dos estados derivados
+    }, [userRole, isSuperAdmin, isTenantAdmin]); // Incluir novas flags de admin
 
     useEffect(() => {
-        if (status === 'authenticated' && !availableTabs.some(tab => tab.value === activeTab)) {
+        if (status === 'authenticated' && availableTabs.length > 0 && !availableTabs.some(tab => tab.value === activeTab)) {
             setActiveTab(availableTabs[0]?.value || 'perfil');
         }
     }, [status, availableTabs, activeTab]);
@@ -96,21 +95,25 @@ export default function ConfiguracoesPage() {
                 <TabsContent value="sistema" className="mt-4"> <AppearanceSettings /> </TabsContent>
 
                 {/* Tenant Admin Tabs */}
+                {/* Renderiza apenas se for Tenant Admin */}
                 {isTenantAdmin && (
                     <>
                         <TabsContent value="usuarios" className="mt-4"> <UserSettingsTable /> </TabsContent>
-                         {/* --- RENDERIZAR NOVO FORM --- */}
                         <TabsContent value="google" className="mt-4"> <GoogleIntegrationSettingsForm /> </TabsContent>
+                        {/* *** RENDERIZAR O NOVO CONTEÚDO DA ABA *** */}
+                        <TabsContent value="uiCustomization" className="mt-4">
+                            <UiCustomizationSettings />
+                       </TabsContent>
                     </>
                 )}
 
                 {/* Super Admin Tabs */}
+                {/* Renderiza apenas se for Super Admin */}
                 {isSuperAdmin && (
                     <>
                         <TabsContent value="empresa" className="mt-4"> <CompanySettingsForm /> </TabsContent>
                         <TabsContent value="apiKeys" className="mt-4"> <ApiKeysSettingsForm /> </TabsContent>
                         <TabsContent value="backup" className="mt-4"> <BackupSettings /> </TabsContent>
-                        {/* <TabsContent value="tenants"> <TenantManagement /> </TabsContent> */}
                     </>
                 )}
 
@@ -118,6 +121,3 @@ export default function ConfiguracoesPage() {
         </motion.div>
     );
 }
-// ============================================================
-// FIM DO ARQUIVO MODIFICADO: components/configuracoes/configuracoes-page.tsx
-// ============================================================

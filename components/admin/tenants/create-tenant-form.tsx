@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { useTenants } from '@/hooks/useTenants'; // Hook para a ação de criar
+import { useTenants } from '@/hooks/useOrganizacoes'; // Hook para a ação de criar
 import { createTenantWithAdminInputSchema, CreateTenantWithAdminInput } from '@/server/api/schemas/tenants'; // Importar schema e tipo
 import { Loader2, Eye, EyeOff, UserPlus } from 'lucide-react';
 import { DialogFooter, DialogClose } from '@/components/ui/dialog'; // Importar para botões

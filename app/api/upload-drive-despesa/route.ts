@@ -11,7 +11,7 @@ import { uploadFileToDrive } from "@/lib/google/drive";
 import mongoose, { Types } from "mongoose";
 import type { Attachment } from "@/server/api/schemas/despesas";
 // Importar o serviço para buscar config do tenant
-import { TenantService } from "@/server/services/tenant.service";
+import { TenantService } from "@/server/services/TenantService";
 
 export const config = { api: { bodyParser: false } };
 

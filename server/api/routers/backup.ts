@@ -13,7 +13,7 @@ import {
     createBackupSchema,
 } from '../schemas/backup';
 import mongoose, { Types } from 'mongoose';
-import { TenantService } from '@/server/services/tenant.service';
+import { TenantService } from '@/server/services/TenantService';
 import { uploadFileToDrive } from '@/lib/google/drive';
 import { logIntegration } from '@/server/services/logging/integrationLogger';
 import type { Context } from '../context';

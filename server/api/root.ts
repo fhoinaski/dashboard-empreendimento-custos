@@ -14,7 +14,8 @@ import { driveRouter } from './routers/drive';
 import { sheetsRouter } from './routers/sheets';
 import { uploadRouter } from './routers/upload';
 import { relatoriosRouter } from './routers/relatorios';
-import { tenantsRouter } from './routers/tenants.router';
+import { tenantsRouter } from './routers/tenantsRouter';
+import { uiConfigRouter } from './routers/uiConfig.router';
 
 
 /**
@@ -37,6 +38,7 @@ export const appRouter = router({
   upload: uploadRouter, 
   relatorios: relatoriosRouter,
   tenants: tenantsRouter,
+  uiConfig: uiConfigRouter,
 
 
   // Endpoints de teste/diagnóstico

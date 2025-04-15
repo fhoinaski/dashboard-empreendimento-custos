@@ -1,13 +1,14 @@
 // ============================================================
 // FILE: lib/db/models.ts
 // DESCRIPTION: Mongoose models and interfaces for the application
+// (Added DynamicUIConfig model and interface)
 // ============================================================
 
 import mongoose, { Schema, Document, Types, Model } from 'mongoose';
 
 // --- Interfaces ---
 
-// Tenant
+// Tenant (Inalterado)
 export interface TenantDocument extends Document {
   _id: Types.ObjectId;
   name: string;
@@ -17,7 +18,7 @@ export interface TenantDocument extends Document {
   updatedAt: Date;
 }
 
-// Subscription
+// Subscription (Inalterado)
 export interface SubscriptionDocument extends Document {
   tenantId: Types.ObjectId;
   plan: 'free' | 'basic' | 'pro' | 'enterprise';
@@ -31,7 +32,7 @@ export interface SubscriptionDocument extends Document {
   updatedAt: Date;
 }
 
-// Billing History
+// Billing History (Inalterado)
 export interface BillingHistoryDocument extends Document {
   tenantId: Types.ObjectId;
   subscriptionId: Types.ObjectId;
@@ -44,7 +45,7 @@ export interface BillingHistoryDocument extends Document {
   updatedAt: Date;
 }
 
-// AppSettings
+// AppSettings (Inalterado)
 export interface AppSettingsDocument extends Document {
   _id: Types.ObjectId;
   tenantId: Types.ObjectId;
@@ -64,7 +65,7 @@ export interface AppSettingsDocument extends Document {
   updatedAt: Date;
 }
 
-// Notification
+// Notification (Inalterado)
 export interface NotificationDocument extends Document {
   tenantId?: Types.ObjectId | null;
   _id: Types.ObjectId;
@@ -78,7 +79,7 @@ export interface NotificationDocument extends Document {
   updatedAt: Date;
 }
 
-// Documento
+// Documento (Inalterado)
 export interface DocumentoDocument extends Document {
   tenantId: Types.ObjectId;
   name: string;
@@ -92,7 +93,7 @@ export interface DocumentoDocument extends Document {
   updatedAt: Date;
 }
 
-// Empreendimento
+// Empreendimento (Inalterado)
 export interface EmpreendimentoDocument extends Document {
   tenantId: Types.ObjectId;
   _id: Types.ObjectId;
@@ -116,13 +117,13 @@ export interface EmpreendimentoDocument extends Document {
   updatedAt: Date;
 }
 
-// *** NEW: Define EmpreendimentoLeanPopulated for lean populated data ***
+// EmpreendimentoLeanPopulated (Inalterado)
 export interface EmpreendimentoLeanPopulated {
   _id: Types.ObjectId;
   name: string;
 }
 
-// Despesa
+// Despesa (Attachment e DespesaDocument - Inalterados)
 interface Attachment {
   _id?: Types.ObjectId;
   fileId?: string;
@@ -150,6 +151,7 @@ export interface DespesaDocument extends Document {
   updatedAt: Date;
 }
 
+// IntegrationLogDocument (Inalterado)
 export interface IntegrationLogDocument extends Document {
   _id: Types.ObjectId;
   tenantId: Types.ObjectId;
@@ -161,7 +163,7 @@ export interface IntegrationLogDocument extends Document {
   updatedAt: Date;
 }
 
-// User
+// User (Inalterado)
 export interface UserDocument extends Document {
   tenantId?: Types.ObjectId | null;
   _id: Types.ObjectId;
@@ -190,16 +192,36 @@ export interface UserDocument extends Document {
   updatedAt: Date;
 }
 
+// *** INÍCIO: Definição do DynamicUIConfig ***
+export interface DynamicUIConfigField {
+  fieldName: string; // Nome original do campo no model/schema (ex: 'description', 'dueDate')
+  label: string;     // Label customizado para exibição
+  required: boolean; // Se o campo é obrigatório na UI (pode diferir do schema base)
+  visible: boolean;  // Se o campo deve ser exibido na UI
+  order?: number;    // Ordem de exibição (opcional)
+}
+
+export interface DynamicUIConfigDocument extends Document {
+  _id: Types.ObjectId;
+  tenantId: Types.ObjectId;
+  module: string; // Ex: 'despesas', 'empreendimentos', 'documentos'
+  labels: Map<string, string>; // Mapeia label original para customizado (ex: {'Descrição': 'Motivo'})
+  fields: DynamicUIConfigField[]; // Array de configurações de campos
+  createdAt: Date;
+  updatedAt: Date;
+}
+// *** FIM: Definição do DynamicUIConfig ***
+
 // --- Schemas ---
 
-const tenantSchema = new Schema<TenantDocument>({
+const tenantSchema = new Schema<TenantDocument>({ /* ... (inalterado) ... */
   name: { type: String, required: true },
   slug: { type: String, required: true, unique: true, lowercase: true, trim: true },
   status: { type: String, enum: ['active', 'pending', 'suspended', 'cancelled'], default: 'pending' },
 }, { timestamps: true });
 tenantSchema.index({ status: 1 });
 
-const subscriptionSchema = new Schema<SubscriptionDocument>({
+const subscriptionSchema = new Schema<SubscriptionDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true, unique: true },
   plan: { type: String, enum: ['free', 'basic', 'pro', 'enterprise'], required: true },
   price: { type: Number, required: true },
@@ -211,7 +233,7 @@ const subscriptionSchema = new Schema<SubscriptionDocument>({
 }, { timestamps: true });
 subscriptionSchema.index({ tenantId: 1, status: 1 });
 
-const billingHistorySchema = new Schema<BillingHistoryDocument>({
+const billingHistorySchema = new Schema<BillingHistoryDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
   subscriptionId: { type: Schema.Types.ObjectId, ref: 'Subscription', required: true },
   amount: { type: Number, required: true },
@@ -222,7 +244,7 @@ const billingHistorySchema = new Schema<BillingHistoryDocument>({
 }, { timestamps: true });
 billingHistorySchema.index({ tenantId: 1, createdAt: -1 });
 
-const appSettingsSchema = new Schema<AppSettingsDocument>({
+const appSettingsSchema = new Schema<AppSettingsDocument>({ /* ... (inalterado) ... */
   _id: { type: Schema.Types.ObjectId, required: true },
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, unique: true, index: true },
   companyName: { type: String, default: null },
@@ -239,7 +261,7 @@ const appSettingsSchema = new Schema<AppSettingsDocument>({
   googleServiceAccountJsonEncrypted: { type: String, default: null },
 }, { _id: false, timestamps: true });
 
-const notificationSchema = new Schema<NotificationDocument>({
+const notificationSchema = new Schema<NotificationDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', index: true, default: null },
   titulo: { type: String, required: true },
   mensagem: { type: String, required: true },
@@ -250,7 +272,7 @@ const notificationSchema = new Schema<NotificationDocument>({
 }, { timestamps: true });
 notificationSchema.index({ tenantId: 1, destinatarioId: 1, lida: 1, createdAt: -1 });
 
-const documentoSchema = new Schema<DocumentoDocument>({
+const documentoSchema = new Schema<DocumentoDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
   name: { type: String, required: true },
   type: { type: String, required: true },
@@ -263,7 +285,7 @@ const documentoSchema = new Schema<DocumentoDocument>({
 documentoSchema.index({ tenantId: 1, empreendimento: 1, category: 1 });
 documentoSchema.index({ tenantId: 1, name: 'text' });
 
-const empreendimentoSchema = new Schema<EmpreendimentoDocument>({
+const empreendimentoSchema = new Schema<EmpreendimentoDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
   name: { type: String, required: true, index: true },
   address: { type: String, required: true },
@@ -286,13 +308,13 @@ empreendimentoSchema.index({ tenantId: 1, status: 1 });
 empreendimentoSchema.index({ tenantId: 1, type: 1 });
 empreendimentoSchema.index({ tenantId: 1, name: 'text' });
 
-const attachmentSubSchema = new Schema<Attachment>({
+const attachmentSubSchema = new Schema<Attachment>({ /* ... (inalterado) ... */
   fileId: { type: String },
   name: { type: String },
   url: { type: String },
 }, { _id: true });
 
-const despesaSchema = new Schema<DespesaDocument>({
+const despesaSchema = new Schema<DespesaDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
   description: { type: String, required: true },
   value: { type: Number, required: true },
@@ -317,7 +339,7 @@ despesaSchema.index({ tenantId: 1, category: 1 });
 despesaSchema.index({ tenantId: 1, empreendimento: 1, dueDate: 1 });
 despesaSchema.index({ tenantId: 1, description: 'text', notes: 'text' });
 
-const integrationLogSchema = new Schema<IntegrationLogDocument>({
+const integrationLogSchema = new Schema<IntegrationLogDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
   integration: { type: String, required: true, enum: ['GoogleDrive', 'GoogleSheets', 'S3', 'Database', 'Outro'], index: true },
   action: { type: String, required: true, enum: ['UPLOAD', 'DOWNLOAD', 'SYNC', 'CREATE_FOLDER', 'DELETE', 'GET_CONFIG', 'UPDATE_SHEET', 'BACKUP', 'CREATE_EXPENSE', 'UPDATE_EXPENSE', 'REVIEW_EXPENSE', 'DELETE_EXPENSE'], index: true },
@@ -327,7 +349,7 @@ const integrationLogSchema = new Schema<IntegrationLogDocument>({
 integrationLogSchema.index({ tenantId: 1, createdAt: -1 });
 integrationLogSchema.index({ integration: 1, status: 1 });
 
-const userSchema = new Schema<UserDocument>({
+const userSchema = new Schema<UserDocument>({ /* ... (inalterado) ... */
   tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
   name: { type: String, required: true },
   email: { type: String, required: true, unique: true },
@@ -357,6 +379,26 @@ userSchema.index({ role: 1 });
 userSchema.index({ tenantId: 1, email: 1 }, { unique: true, partialFilterExpression: { tenantId: { $type: 'objectId' } } });
 userSchema.index({ tenantId: 1, role: 1 });
 
+// *** INÍCIO: Schema do DynamicUIConfig ***
+const dynamicUIConfigFieldSchema = new Schema<DynamicUIConfigField>({
+  fieldName: { type: String, required: true },
+  label: { type: String, required: true },
+  required: { type: Boolean, default: false },
+  visible: { type: Boolean, default: true },
+  order: { type: Number },
+}, { _id: false }); // Não gera _id para subdocumentos do array
+
+const dynamicUIConfigSchema = new Schema<DynamicUIConfigDocument>({
+  tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
+  module: { type: String, required: true, index: true },
+  labels: { type: Map, of: String, default: {} }, // Mongoose Map<String, String>
+  fields: [dynamicUIConfigFieldSchema], // Array do subdocumento
+}, { timestamps: true });
+
+// Índice único para tenantId + module
+dynamicUIConfigSchema.index({ tenantId: 1, module: 1 }, { unique: true });
+// *** FIM: Schema do DynamicUIConfig ***
+
 // --- Models ---
 export const Tenant: Model<TenantDocument> = mongoose.models.Tenant || mongoose.model<TenantDocument>('Tenant', tenantSchema);
 export const Subscription: Model<SubscriptionDocument> = mongoose.models.Subscription || mongoose.model<SubscriptionDocument>('Subscription', subscriptionSchema);
@@ -368,6 +410,11 @@ export const Empreendimento: Model<EmpreendimentoDocument> = mongoose.models.Emp
 export const Despesa: Model<DespesaDocument> = mongoose.models.Despesa || mongoose.model<DespesaDocument>('Despesa', despesaSchema);
 export const User: Model<UserDocument> = mongoose.models.User || mongoose.model<UserDocument>('User', userSchema);
 export const IntegrationLog: Model<IntegrationLogDocument> = mongoose.models.IntegrationLog || mongoose.model<IntegrationLogDocument>('IntegrationLog', integrationLogSchema);
+
+// *** INÍCIO: Exportação do Model DynamicUIConfig ***
+export const DynamicUIConfig: Model<DynamicUIConfigDocument> = mongoose.models.DynamicUIConfig || mongoose.model<DynamicUIConfigDocument>('DynamicUIConfig', dynamicUIConfigSchema);
+// *** FIM: Exportação do Model DynamicUIConfig ***
+
 // ============================================================
 // END OF FILE: lib/db/models.ts
 // ============================================================

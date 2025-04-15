@@ -10,7 +10,7 @@ import { Empreendimento, Documento, AppSettings } from "@/lib/db/models"; // Imp
 import { uploadFileToDrive } from "@/lib/google/drive";
 import mongoose, { Types, Document as MongooseDocument } from "mongoose";
 // Importar o serviço para buscar config do tenant
-import { TenantService } from "@/server/services/tenant.service";
+import { TenantService } from "@/server/services/TenantService";
 
 // Define a basic interface for the Documento document (adjust based on your schema)
 interface IDocumento extends MongooseDocument {
