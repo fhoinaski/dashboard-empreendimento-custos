@@ -4,38 +4,24 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { useSession } from 'next-auth/react';
-import {
-    LayoutDashboard, Building, Receipt, BarChart3, Calendar, Settings, HelpCircle, FileText, ChevronLeft, X, Lock
-} from "lucide-react"; // Removed Users, Server as they are admin-only settings now
+import { useSession } from "next-auth/react";
+import { Building, ChevronLeft, X, } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "../ui/skeleton";
+import { getVisibleMenuItems, menuItems, MenuItem, isLinkActive } from "@/lib/navigation";
 
 interface DashboardSidebarProps {
   mobileOpen: boolean;
   setMobileOpen: (open: boolean) => void;
 }
 
-// Define menu items with required roles
-const menuItems = [
-    // Admin only items
-    { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ['admin'] },
-    { title: "Relatórios", href: "/dashboard/relatorios", icon: BarChart3, roles: ['admin'] },
-    { title: "Documentos", href: "/dashboard/documentos", icon: FileText, roles: ['admin'] }, // Assuming Admin only for now
-
-    // Admin & Manager items
-    { title: "Empreendimentos", href: "/dashboard/empreendimentos", icon: Building, roles: ['admin', 'manager'] },
-
-    // All roles items
-    { title: "Despesas", href: "/dashboard/despesas", icon: Receipt, roles: ['admin', 'manager', 'user'] },
-    { title: "Calendário", href: "/dashboard/calendario", icon: Calendar, roles: ['admin', 'manager', 'user'] },
-    { title: "Configurações", href: "/dashboard/configuracoes", icon: Settings, roles: ['admin', 'manager', 'user'] },
-    { title: "Ajuda", href: "/dashboard/ajuda", icon: HelpCircle, roles: ['admin', 'manager', 'user'] },
-];
-
-export default function DashboardSidebar({ mobileOpen, setMobileOpen }: DashboardSidebarProps) {
+export default function DashboardSidebar({
+  
+  mobileOpen,
+  setMobileOpen,
+}: DashboardSidebarProps) {
   const { data: session, status } = useSession();
   const userRole = session?.user?.role;
 
@@ -45,27 +31,35 @@ export default function DashboardSidebar({ mobileOpen, setMobileOpen }: Dashboar
   const toggleCollapse = () => setIsCollapsed(!isCollapsed);
 
   // Filter menu items based on user role AFTER session is loaded
-  const visibleMenuItems = status === 'authenticated' && userRole
-      ? menuItems.filter(item => item.roles.includes(userRole))
-      : []; // Return empty array if no session or role
+  const visibleMenuItems: MenuItem[] = status === "authenticated"
+    ? getVisibleMenuItems(menuItems, userRole)
+    : []; // Return empty array if no session or role
 
   // Animation variants
-  const desktopSidebarVariants = { expanded: { width: "16rem" }, collapsed: { width: "4rem" }};
+  const desktopSidebarVariants = {
+    expanded: { width: "16rem" },
+    collapsed: { width: "4rem" },
+  };
   const desktopTransition = { duration: 0.3, ease: [0.4, 0, 0.2, 1] };
-  const mobileSidebarVariants = { hidden: { x: "-100%" }, visible: { x: 0 }};
+  const mobileSidebarVariants = {
+    hidden: { x: "-100%" },
+    visible: { x: 0 },
+  };
   const mobileTransition = { duration: 0.3, ease: [0.32, 0.72, 0, 1] };
 
   // Loading Skeleton
-  if (status === 'loading') {
-     return (
-         <aside className="hidden lg:flex flex-col border-r bg-background h-screen sticky top-0 w-16 animate-pulse">
-              <div className="h-16 border-b flex items-center justify-center p-2"><Building className="h-6 w-6 text-muted" /></div>
-              <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-2">
-                   {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-9 w-9 rounded-md" />)}
-              </nav>
-               <div className="p-2 border-t mt-auto shrink-0"><Skeleton className="h-9 w-9 rounded-md" /></div>
-         </aside>
-     );
+  if (status === "loading") {
+    return (
+      <aside className="hidden lg:flex flex-col border-r bg-background h-screen sticky top-0 w-16 animate-pulse">
+        <div className="h-16 border-b flex items-center justify-center p-2">
+          <Building className="h-6 w-6 text-muted" />
+        </div>
+        <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4 px-2 space-y-2">
+          {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-9 w-9 rounded-md" />)}
+        </nav>
+        <div className="p-2 border-t mt-auto shrink-0"><Skeleton className="h-9 w-9 rounded-md" /></div>
+      </aside>
+    );
   }
 
    // Unauthenticated state (optional, middleware should handle redirect)
@@ -77,16 +71,31 @@ export default function DashboardSidebar({ mobileOpen, setMobileOpen }: Dashboar
     <TooltipProvider delayDuration={100}>
       {/* Sidebar Desktop */}
       <motion.aside
-        initial={false} animate={isCollapsed ? "collapsed" : "expanded"} variants={desktopSidebarVariants}
-        transition={desktopTransition} className="hidden lg:flex flex-col border-r bg-background h-screen sticky top-0"
+        initial={false}
+        animate={isCollapsed ? "collapsed" : "expanded"}
+        variants={desktopSidebarVariants}
+        transition={desktopTransition}
+        className="hidden lg:flex flex-col border-r bg-background h-screen sticky top-0"
       >
         {/* Header */}
-        <div className={cn("h-16 border-b flex items-center shrink-0", isCollapsed ? "justify-center" : "px-4")}>
+        <div
+          className={cn(
+            "h-16 border-b flex items-center shrink-0",
+            isCollapsed ? "justify-center" : "px-4"
+          )}
+        >
           <AnimatePresence initial={false} mode="wait">
             {!isCollapsed ? (
-              <motion.div key="logo-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+              <motion.div
+                key="logo-full"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.2 }}
+              >
                 <Link href="/dashboard" className="flex items-center gap-2 font-semibold text-lg">
-                    <Building className="h-6 w-6 text-primary" /><span>Gestão</span>
+                  <Building className="h-6 w-6 text-primary" />
+                  <span>Gestão</span>
                 </Link>
               </motion.div>
             ) : (
@@ -101,27 +110,37 @@ export default function DashboardSidebar({ mobileOpen, setMobileOpen }: Dashboar
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-4">
           <ul className="space-y-1 px-2">
             {visibleMenuItems.map((item) => {
-              const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
+              const isActive = isLinkActive(pathname, item.href);
               return (
                 <li key={item.href}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                       <Link href={item.href} passHref legacyBehavior>
-                        <a className={cn(
+                      <Link href={item.href} passHref legacyBehavior>
+                        <a
+                          className={cn(
                             "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors h-9",
-                            isActive ? "bg-muted text-primary" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                            isActive
+                              ? "bg-muted text-primary"
+                              : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                             isCollapsed && "justify-center"
-                        )}>
-                            <item.icon className="h-5 w-5 flex-shrink-0" />
-                            <AnimatePresence initial={false}>
-                              {!isCollapsed && (
-                                <motion.span initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: 'auto' }} exit={{ opacity: 0, width: 0 }} transition={{ duration: 0.2, delay: 0.1 }} className="whitespace-nowrap overflow-hidden">
-                                  {item.title}
-                                </motion.span>
-                              )}
-                            </AnimatePresence>
+                          )}
+                        >
+                          <item.icon className="h-5 w-5 flex-shrink-0" />
+                          <AnimatePresence initial={false}>
+                            {!isCollapsed && (
+                              <motion.span
+                                initial={{ opacity: 0, width: 0 }}
+                                animate={{ opacity: 1, width: "auto" }}
+                                exit={{ opacity: 0, width: 0 }}
+                                transition={{ duration: 0.2, delay: 0.1 }}
+                                className="whitespace-nowrap overflow-hidden"
+                              >
+                                {item.title}
+                              </motion.span>
+                            )}
+                          </AnimatePresence>
                         </a>
-                       </Link>
+                      </Link>
                     </TooltipTrigger>
                     {isCollapsed && (<TooltipContent side="right" align="center"><p>{item.title}</p></TooltipContent>)}
                   </Tooltip>
@@ -133,16 +152,27 @@ export default function DashboardSidebar({ mobileOpen, setMobileOpen }: Dashboar
 
         {/* Footer Toggle */}
         <div className="p-2 border-t mt-auto shrink-0">
-            <Tooltip>
-                <TooltipTrigger asChild>
-                     <Button variant="ghost" size="icon" className="w-full h-9" onClick={toggleCollapse} aria-label={isCollapsed ? "Expandir menu" : "Recolher menu"}>
-                         <motion.div animate={{ rotate: isCollapsed ? 180 : 0 }} transition={{ duration: 0.3 }}>
-                            <ChevronLeft className="h-5 w-5" />
-                         </motion.div>
-                    </Button>
-                </TooltipTrigger>
-                 <TooltipContent side="right" align="center"><p>{isCollapsed ? "Expandir" : "Recolher"}</p></TooltipContent>
-            </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-full h-9"
+                onClick={toggleCollapse}
+                aria-label={isCollapsed ? "Expandir menu" : "Recolher menu"}
+              >
+                <motion.div
+                  animate={{ rotate: isCollapsed ? 180 : 0 }}
+                  transition={{ duration: 0.3 }}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </motion.div>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right" align="center">
+              <p>{isCollapsed ? "Expandir" : "Recolher"}</p>
+            </TooltipContent>
+          </Tooltip>
         </div>
       </motion.aside>
 
@@ -161,7 +191,7 @@ export default function DashboardSidebar({ mobileOpen, setMobileOpen }: Dashboar
                 <nav className="flex-1 overflow-y-auto py-4">
                 <ul className="space-y-1 px-2">
                     {visibleMenuItems.map((item) => {
-                        const isActive = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
+                        const isActive = isLinkActive(pathname, item.href);
                         return (
                             <li key={`mobile-${item.href}`}>
                                 <Link href={item.href} passHref legacyBehavior>
