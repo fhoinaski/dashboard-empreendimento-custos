@@ -5,5 +5,5 @@ export interface RecentVentureItem {
     status: string;
     pendingExpenses?: number;
     updatedAt: string;
-    image?: string | null;
+    image?: string;
   }

@@ -47,7 +47,7 @@ export default function AppearanceSettings() {
                         <Button variant="outline" onClick={() => setTheme('dark')} className={cn(theme === 'dark' && 'border-primary ring-1 ring-primary')}> <Moon className="mr-2 h-4 w-4" />Escuro </Button>
                         <Button variant="outline" onClick={() => setTheme('system')} className={cn(theme === 'system' && 'border-primary ring-1 ring-primary')}> <Laptop className="mr-2 h-4 w-4" />Sistema </Button>
                     </div>
-                </div>
+                
             <Separator />
                     <h3 className="text-lg font-medium mb-3">Idioma e Região</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
