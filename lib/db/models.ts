@@ -227,13 +227,7 @@ const notificationSchema = new Schema<NotificationDocument>({
   lida: { type: Boolean, default: false },
 }, { timestamps: true });
 
-// --- Models ---
-export const User: Model<UserDocument> = mongoose.models.User || mongoose.model<UserDocument>('User', userSchema);
-export const Empreendimento: Model<EmpreendimentoDocument> = mongoose.models.Empreendimento || mongoose.model<EmpreendimentoDocument>('Empreendimento', empreendimentoSchema);
-export const Despesa: Model<DespesaDocument> = mongoose.models.Despesa || mongoose.model<DespesaDocument>('Despesa', despesaSchema);
-export const Documento: Model<DocumentoDocument> = mongoose.models.Documento || mongoose.model<DocumentoDocument>('Documento', documentoSchema);
-export const AppSettings: Model<AppSettingsDocument> = mongoose.models.AppSettings || mongoose.model<AppSettingsDocument>('AppSettings', appSettingsSchema);
-export const Notification: Model<NotificationDocument> = mongoose.models.Notification || mongoose.model<NotificationDocument>('Notification', notificationSchema);
 // ============================================================
 // END OF REFACTORED FILE: lib/db/models.ts
 // ============================================================
+export {};

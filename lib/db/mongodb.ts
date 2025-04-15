@@ -19,6 +19,9 @@ if (!MONGODB_URI) {
   throw new Error("Por favor, defina a variável de ambiente MONGODB_URI no .env.local");
 }
 
+mongoose.set('strictQuery', false);
+
+
 // 4. Inicialize o cache global de forma tipada
 //    Use 'globalThis.mongooseCache' para acessar a variável global tipada
 let cached: MongooseCache = globalThis.mongooseCache || { conn: null, promise: null };

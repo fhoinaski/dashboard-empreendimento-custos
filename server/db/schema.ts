@@ -37,8 +37,8 @@ const PlanMongooseSchema = new mongoose.Schema({
 });
 
 // Mongoose models
-export const UserModel = mongoose.model("User", UserMongooseSchema);
-export const PlanModel = mongoose.model("Plan", PlanMongooseSchema);
+export const UserModel = mongoose.models.User || mongoose.model('User', UserMongooseSchema);
+export const PlanModel = mongoose.models.Plan || mongoose.model('Plan', PlanMongooseSchema);
 
 export type User = z.infer<typeof User>;
 export type Plan = z.infer<typeof Plan>;
