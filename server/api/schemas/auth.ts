@@ -37,6 +37,10 @@ export const createUserSchema = z.object({
   name: z.string().trim().min(2, { message: 'O nome deve ter pelo menos 2 caracteres' }),
   email: z.string().email({ message: 'Email inválido' }),
   password: z.string().min(6, { message: 'A senha deve ter pelo menos 6 caracteres' }),
+  plan: z.enum(['free', 'plus', 'pro'], {
+    errorMap: () => ({ message: "Plano inválido" })
+  }).default('free'),
+
   role: z.enum(['admin', 'manager', 'user'], {
     errorMap: () => ({ message: "Função inválida" })
   }),
@@ -50,6 +54,9 @@ export type CreateUserInput = z.infer<typeof createUserSchema>;
 
 // Schema para atualização de usuário (usado por usersRouter.update)
 export const updateUserSchema = z.object({
+    plan: z.enum(['free', 'plus', 'pro'], {
+      errorMap: () => ({ message: "Plano inválido" })
+    }).optional(),
     name: z.string().trim().min(2, { message: 'O nome deve ter pelo menos 2 caracteres' }).optional(),
     role: z.enum(['admin', 'manager', 'user'], {
         errorMap: () => ({ message: "Função inválida" })

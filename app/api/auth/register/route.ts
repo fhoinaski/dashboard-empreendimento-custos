@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     console.log("[API POST /register] Request body:", JSON.stringify(body, null, 2));
-    const { name, email, password, role, assignedEmpreendimentos } = body;
+    const { name, email, password, role, assignedEmpreendimentos, plan } = body;
 
     // Validar campos obrigatórios
     if (!name || !email || !password) {
@@ -50,6 +50,11 @@ export async function POST(request: Request) {
     const validRoles = ['admin', 'manager', 'user'];
     const finalRole = validRoles.includes(role) ? role : 'user';
 
+    // Definir o plano do usuário, somente se não for super admin
+    const finalPlan = finalRole === 'admin' ? undefined : plan;
+    const validPlans = ['free', 'plus', 'pro'];
+    const finalPlanValue = validPlans.includes(finalPlan) ? finalPlan : 'free';
+
     // Preparar document base
     const userData = {
       name,
@@ -57,6 +62,11 @@ export async function POST(request: Request) {
       password: hashedPassword,
       role: finalRole,
     };
+
+    // Adiciona o plano somente se o valor for valido
+    if(finalPlanValue){
+      userData.plan = finalPlanValue
+    }
 
     // Adicionar empreendimentos para usuários
     if (finalRole === 'user' && Array.isArray(assignedEmpreendimentos) && assignedEmpreendimentos.length > 0) {

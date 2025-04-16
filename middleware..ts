@@ -38,7 +38,7 @@ export async function middleware(request: NextRequest) {
   console.log(`[Middleware] Path: ${pathname}, IsAuth: ${isAuthenticated}, Token ID: ${token?.id ?? token?.sub ?? 'N/A'}, Token Role: ${token?.role ?? 'N/A'}`);
 
   // Definir rotas protegidas e públicas - incluindo mais caminhos de dashboard
-  const protectedRoutes = ['/dashboard', '/dashboard/', '/dashboard/home', '/api/dashboard', '/api/despesas', '/api/documents', '/api/drive', '/api/empreendimentos', '/api/notifications', '/api/sheets', '/api/upload-s3'];
+  const protectedRoutes = ['/dashboard', '/dashboard/', '/dashboard/home','/dashboard/super-admin', '/api/dashboard', '/api/despesas', '/api/documents', '/api/drive', '/api/empreendimentos', '/api/notifications', '/api/sheets', '/api/upload-s3'];
   const publicRoutes = ['/login', '/api/auth/providers', '/api/auth/csrf', '/api/auth/callback', '/api/auth/signout', '/api/auth/error', '/api/create-admin', '/api/test'];
 
   // Verificar se é uma rota de API de autenticação ou relacionada à sessão

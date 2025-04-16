@@ -29,6 +29,16 @@ const isAuthenticated = middleware(async ({ ctx, next }) => {
   });
 });
 
+// Middleware de super admin
+const isSuperAdmin = middleware(async ({ ctx, next }) => {
+  if (ctx.session?.user?.role !== 'super_admin') {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Acesso restrito a super administradores' });
+  }
+  return next();
+});
+
+
+
 // Middleware de admin
 const isAdmin = middleware(async ({ ctx, next }) => {
   if (ctx.session?.user?.role !== 'admin') {
@@ -40,3 +50,4 @@ const isAdmin = middleware(async ({ ctx, next }) => {
 // Procedimentos protegidos
 export const protectedProcedure = t.procedure.use(isAuthenticated);
 export const adminProcedure = t.procedure.use(isAuthenticated).use(isAdmin);
+export const superAdminProcedure = t.procedure.use(isAuthenticated).use(isSuperAdmin);

@@ -7,15 +7,15 @@ import {
     notificationSummaryResponseSchema // Import summary response schema
 } from '../schemas/notifications';
 import connectToDatabase from '@/lib/db/mongodb';
-import { Notification, User, Empreendimento, NotificationDocument } from '@/lib/db/models'; // Import NotificationDocument
-import mongoose, { Types, FilterQuery } from 'mongoose';
+import { User, Empreendimento, Notification, NotificationDocument } from '../../db/schema';
+import mongoose, { Types, FilterQuery, Model, Schema } from 'mongoose';
+
 
 // Interface for Notification populada com lean (matching schema)
-interface PopulatedLeanNotification extends Omit<NotificationDocument, 'destinatarioId' | 'empreendimentoId'>{
+interface PopulatedLeanNotification extends Omit<NotificationDocument, 'destinatarioId' | 'empreendimentoId'> {
   _id: Types.ObjectId;
   destinatarioId?: { _id: Types.ObjectId; name: string } | null;
   empreendimentoId?: { _id: Types.ObjectId; name: string } | null;
-  // Other fields from NotificationDocument
   titulo: string;
   mensagem: string;
   tipo: 'info' | 'warning' | 'error' | 'success';
@@ -23,6 +23,8 @@ interface PopulatedLeanNotification extends Omit<NotificationDocument, 'destinat
   createdAt: Date;
   updatedAt: Date;
 }
+
+
 
 
 /**
@@ -48,7 +50,8 @@ export const notificationsRouter = router({
            // lida: false, // Fetch only unread for summary count? Or all recent? Let's fetch recent unread.
         };
 
-         console.log("[tRPC notifications.getSummary] Filtro MongoDB:", JSON.stringify(filter));
+        console.log("[tRPC notifications.getSummary] Filtro MongoDB:", JSON.stringify(filter));
+        
 
         // Fetch recent notifications (e.g., last 50) and count unread
         const [notifications, unreadCount, totalCount] = await Promise.all([
@@ -91,7 +94,7 @@ export const notificationsRouter = router({
         });
       }
     }),
-
+    
   // Marcar notificação como lida/não lida
   markAsRead: protectedProcedure
     .input(updateNotificationSchema) // Uses schema { id: string, lida: boolean }
@@ -101,7 +104,7 @@ export const notificationsRouter = router({
         await connectToDatabase();
         const userId = new Types.ObjectId(ctx.user.id);
 
-        // Find the notification
+        // Find the notificatio
         const notification = await Notification.findById(input.id);
         if (!notification) {
            console.error(`[tRPC notifications.markAsRead] Notificação não encontrada: ${input.id}`);
@@ -143,7 +146,7 @@ export const notificationsRouter = router({
         });
       }
     }),
-
+    
   // Criar notificação (para uso interno do sistema/backend)
   // Should likely be an adminProcedure or restricted internal call
   // For now, keeping protectedProcedure but adding a check
@@ -169,7 +172,7 @@ export const notificationsRouter = router({
 
         // Validate referenced documents if IDs were provided
         if (destinatarioObjectId) {
-            const userExists = await User.exists({ _id: destinatarioObjectId });
+            const userExists = await User.exists({ _id: destinatarioObjectId });   
             if (!userExists) throw new TRPCError({ code: 'BAD_REQUEST', message: `Destinatário não encontrado: ${input.destinatarioId}` });
         }
         if (empreendimentoObjectId) {
